@@ -819,7 +819,7 @@ static int dev_detect_link(struct mt_interface* inf) {
 
   memset(&eth_link, 0, sizeof(eth_link));
 
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < 1000; i++) {
     err = rte_eth_link_get_nowait(port_id, &eth_link);
     if (err < 0) {
       err("%s, failed to get link status for port %d, ret %d\n", __func__, port_id, err);
