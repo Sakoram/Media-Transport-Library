@@ -2768,7 +2768,7 @@ static int tv_mempool_init(struct mtl_main_impl* impl,
         snprintf(pool_name, 32, "%sM%dS%dP%d_HDR_%d", ST_TX_VIDEO_PREFIX, mgr->idx, idx,
                  i, s->recovery_idx);
         struct rte_mempool* mbuf_pool = mt_mempool_create_by_socket(
-            impl, pool_name, n, MT_MBUF_CACHE_SIZE, sizeof(struct mt_muf_priv_data),
+            impl, pool_name, n, MT_MBUF_ZERO_CACHE_SIZE, sizeof(struct mt_muf_priv_data),
             hdr_room_size, s->socket_id);
         if (!mbuf_pool) {
           tv_mempool_free(s);
@@ -2796,7 +2796,7 @@ static int tv_mempool_init(struct mtl_main_impl* impl,
       snprintf(pool_name, 32, "%sM%dS%d_CHAIN_%d", ST_TX_VIDEO_PREFIX, mgr->idx, idx,
                s->recovery_idx);
       struct rte_mempool* mbuf_pool = mt_mempool_create_by_socket(
-          impl, pool_name, n, MT_MBUF_CACHE_SIZE, 0, chain_room_size, s->socket_id);
+          impl, pool_name, n, MT_MBUF_ZERO_CACHE_SIZE, 0, chain_room_size, s->socket_id);
       if (!mbuf_pool) {
         tv_mempool_free(s);
         return -ENOMEM;
@@ -2812,7 +2812,7 @@ static int tv_mempool_init(struct mtl_main_impl* impl,
         snprintf(pool_name, 32, "%sM%dS%d_COPY_%d", ST_TX_VIDEO_PREFIX, mgr->idx, idx,
                  s->recovery_idx);
         struct rte_mempool* mbuf_pool = mt_mempool_create_by_socket(
-            impl, pool_name, n, MT_MBUF_CACHE_SIZE, 0, chain_room_size, s->socket_id);
+            impl, pool_name, n, MT_MBUF_ZERO_CACHE_SIZE, 0, chain_room_size, s->socket_id);
         if (!mbuf_pool) {
           tv_mempool_free(s);
           return -ENOMEM;
