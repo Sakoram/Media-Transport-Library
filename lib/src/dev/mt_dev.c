@@ -819,7 +819,7 @@ static int dev_detect_link(struct mt_interface* inf) {
 
   memset(&eth_link, 0, sizeof(eth_link));
 
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < 1000; i++) {
     err = rte_eth_link_get_nowait(port_id, &eth_link);
     if (err < 0) {
       err("%s, failed to get link status for port %d, ret %d\n", __func__, port_id, err);
@@ -974,6 +974,8 @@ static int dev_config_port(struct mt_interface* inf) {
     }
     port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
   }
+
+  port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_SEND_ON_TIMESTAMP;
 
   ret = rte_eth_dev_configure(port_id, nb_rx_q, nb_tx_q, &port_conf);
   if (ret < 0) {

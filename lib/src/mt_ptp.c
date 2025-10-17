@@ -542,12 +542,18 @@ static void ptp_adjust_delta(struct mt_ptp_impl* ptp, int64_t delta, bool error_
     /*
      * Be considered as locked while the max delta is continuously below 100ns.
      */
-    if (labs(ptp->stat_delta_max) < 100 && labs(ptp->stat_delta_max) > 0 &&
-        labs(ptp->stat_delta_min) < 100 && labs(ptp->stat_delta_min) > 0) {
+    if (labs(ptp->stat_delta_max) < 6000 && labs(ptp->stat_delta_max) > -3000 &&
+        labs(ptp->stat_delta_min) < 6000 && labs(ptp->stat_delta_min) > -3000) {
       if (ptp->stat_sync_keep > 100)
+      {
         ptp->locked = true;
+        err("#@#@#@#@#@#@ \n #@#@#@# locked @#@#@#@ \n #@#@#@#@#@#@ \n");
+      }
       else
+      {
         ptp->stat_sync_keep++;
+        err("stat_sync_keep: %d\n", ptp->stat_sync_keep);
+      }
     } else {
       ptp->stat_sync_keep = 0;
     }
@@ -871,9 +877,9 @@ static void ptp_delay_req_task(struct mt_ptp_impl* ptp) {
   m->pkt_len = hdr_offset + sizeof(struct mt_ptp_sync_msg);
   m->data_len = m->pkt_len;
 
-#if MT_PTP_USE_TX_TIME_STAMP
-  ptp_timesync_read_tx_time(ptp, &tx_ns); /* read out tx time */
-#endif
+// #if MT_PTP_USE_TX_TIME_STAMP
+//   ptp_timesync_read_tx_time(ptp, &tx_ns); /* read out tx time */
+// #endif
 
   // mt_mbuf_dump(port, 0, "PTP_DELAY_REQ", m);
   uint16_t tx = mt_sys_queue_tx_burst(ptp->impl, port, &m, 1);
@@ -1454,9 +1460,9 @@ int mt_ptp_parse(struct mt_ptp_impl* ptp, struct mt_ptp_header* hdr, bool vlan,
     if (!ptp_port_id_equal(&hdr->source_port_identity, &ptp->master_port_id)) {
       dbg("%s(%d), source_port_identity not our master, message_type %d, mode %s\n",
           __func__, port, hdr->message_type, ptp_mode_str(mode));
-#ifdef DEBUG
-      ptp_print_port_id(port, &hdr->source_port_identity);
-#endif
+// #ifdef DEBUG
+//       ptp_print_port_id(port, &hdr->source_port_identity);
+// #endif
       return -EINVAL;
     }
   }
