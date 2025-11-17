@@ -662,6 +662,24 @@ uint64_t st_app_user_time(void* ctx, struct st_user_time* user_time, uint64_t fr
   offset = user_time->user_time_offset;
   tai_time = user_time->base_tai_time + offset + (uint64_t)(frame_time * frame_num);
 
+#if 1  // check for rtp jitter
+  static uint64_t fn = 0;
+  if (!fn) {
+    fn = user_time->base_tai_time / frame_time;
+    fn += (fn % 2) + 2;  // add some offset
+  }
+  __float128 ft_num = 1001 * 1e9;
+  __float128 ft_den = 60000;
+  tai_time = roundl((fn + frame_num) * ft_num / ft_den);
+  //  tai_time += 1; // uncomment to fix the issue
+
+  uint32_t rtp_fixed = (uint64_t)((fn + frame_num) * 1501.5);   // expected value
+  uint32_t rtp_wrong = st10_tai_to_media_clk(tai_time, 90000);  // rounding error
+  err("%s, tai_ns %lu rtp_fixed %u rtp_wrong %u rtp_jitter %d\n", __func__, tai_time,
+       rtp_fixed, rtp_wrong, rtp_fixed - rtp_wrong);
+
+#endif
+
   return tai_time;
 }
 
