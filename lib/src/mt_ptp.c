@@ -542,9 +542,9 @@ static void ptp_adjust_delta(struct mt_ptp_impl* ptp, int64_t delta, bool error_
     /*
      * Be considered as locked while the max delta is continuously below 100ns.
      */
-    if (labs(ptp->stat_delta_max) < 6000 && labs(ptp->stat_delta_max) > -3000 &&
-        labs(ptp->stat_delta_min) < 6000 && labs(ptp->stat_delta_min) > -3000) {
-      if (ptp->stat_sync_keep > 100)
+    if (labs(ptp->stat_delta_max) < 60000 && labs(ptp->stat_delta_max) > -30000 &&
+        labs(ptp->stat_delta_min) < 60000 && labs(ptp->stat_delta_min) > -30000) {
+      if (ptp->stat_sync_keep > 10)
       {
         ptp->locked = true;
         err("#@#@#@#@#@#@ \n #@#@#@# locked @#@#@#@ \n #@#@#@#@#@#@ \n");

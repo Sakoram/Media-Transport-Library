@@ -16,6 +16,7 @@
 #include <sys/file.h>
 #include <sys/queue.h>
 #include <unistd.h>
+#include <rte_cpuflags.h>
 
 #include "mt_mem.h"
 #include "mt_platform.h"

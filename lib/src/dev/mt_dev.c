@@ -841,7 +841,7 @@ static int dev_detect_link(struct mt_interface* inf) {
 }
 
 static int dev_start_timesync(struct mt_interface* inf) {
-  int ret, i = 0, max_retry = 10;
+  int ret, i = 0, max_retry = 400;
   uint16_t port_id = inf->port_id;
   enum mtl_port port = inf->port;
   struct timespec spec;
