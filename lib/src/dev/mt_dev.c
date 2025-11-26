@@ -974,8 +974,9 @@ static int dev_config_port(struct mt_interface* inf) {
     }
     port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
   }
-
-  port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_SEND_ON_TIMESTAMP;
+  if (inf->feature & MT_IF_FEATURE_TX_OFFLOAD_SEND_ON_TIMESTAMP) {
+    port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_SEND_ON_TIMESTAMP;
+  }
 
   ret = rte_eth_dev_configure(port_id, nb_rx_q, nb_tx_q, &port_conf);
   if (ret < 0) {

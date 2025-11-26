@@ -545,6 +545,9 @@ static void ptp_adjust_delta(struct mt_ptp_impl* ptp, int64_t delta, bool error_
     if (labs(ptp->stat_delta_max) < 60000 && labs(ptp->stat_delta_max) > -30000 &&
         labs(ptp->stat_delta_min) < 60000 && labs(ptp->stat_delta_min) > -30000) {
       if (ptp->stat_sync_keep > 10)
+    // if (labs(ptp->stat_delta_max) < 6000 && labs(ptp->stat_delta_max) > -3000 &&
+    //     labs(ptp->stat_delta_min) < 6000 && labs(ptp->stat_delta_min) > -3000) {
+    //   if (ptp->stat_sync_keep > 100)
       {
         ptp->locked = true;
         err("#@#@#@#@#@#@ \n #@#@#@# locked @#@#@#@ \n #@#@#@#@#@#@ \n");
@@ -935,18 +938,18 @@ static void ptp_delay_req_task(struct mt_ptp_impl* ptp) {
 #endif
 
     ptp->t3 = tx_ns;
+    // dbg("%s(%d), t3 %" PRIu64 ", seq %d, max_retry %d, ptp %" PRIu64 "\n", __func__, port,
+    //     ptp->t3, ptp->t3_sequence_id, max_retry, ptp_get_raw_time(ptp));
+    // MT_USDT_PTP_MSG(ptp->port, 3, ptp->t3);
+  }
 #else
   ptp->t3 = ptp_get_raw_time(ptp);
 #endif
-    dbg("%s(%d), t3 %" PRIu64 ", seq %d, max_retry %d, ptp %" PRIu64 "\n", __func__, port,
-        ptp->t3, ptp->t3_sequence_id, max_retry, ptp_get_raw_time(ptp));
-    MT_USDT_PTP_MSG(ptp->port, 3, ptp->t3);
-
+  
     /* all time get */
     if (ptp->t4 && ptp->t2 && ptp->t1) {
       ptp_parse_result(ptp);
     }
-  }
 }
 
 #if MT_PTP_USE_TX_TIMER

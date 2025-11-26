@@ -1,7 +1,7 @@
 {
     "interfaces": [
         {
-            "name": "0000:ca:00.1",
+            "name": "0000:ca:00.0",
             "ip": "192.168.30.10"
         }
     ],
@@ -20,7 +20,7 @@
                     "payload_type": 112,
                     "width": 1920,
                     "height": 1080,
-                    "fps": "p59",
+                    "fps": "p25",
                     "device": "AUTO",
                     "input_format": "YUV422PLANAR10LE",
                     "transport_format": "YUV_422_10bit",

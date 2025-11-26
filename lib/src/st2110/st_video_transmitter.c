@@ -433,8 +433,11 @@ static int video_trs_tsc_tasklet(struct mtl_main_impl* impl,
         return delta < mt_sch_schedule_ns(impl) ? MTL_TASKLET_HAS_PENDING
                                                 : MTL_TASKLET_ALL_DONE;
       } else {
+          static int error_count = 0;
+        if (error_count++ % 200 == 0) {
         err("%s(%d), invalid tsc cur %" PRIu64 " target %" PRIu64 "\n", __func__, idx,
             cur_tsc, target_tsc);
+        }
       }
     }
   }
@@ -514,6 +517,13 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
   if (valid_bulk > 0) {
     for (i = 0; i < valid_bulk; i++) {
       target_ptp = st_tx_mbuf_get_ptp(pkts[i]);
+      // uint64_t cur_ptp = mt_get_ptp_time(impl, port);
+      // static int ptp_log_counter;
+      // if (ptp_log_counter++ % 50 == 0) {
+      //   int64_t ptp_diff = (int64_t)target_ptp - (int64_t)cur_ptp;
+      //   err("%s(%d,%d), cur_ptp %" PRIu64 " target_ptp %" PRIu64 " diff %" PRId64 "\n",
+      //   __func__, s->idx, s_port, cur_ptp, target_ptp, ptp_diff);
+      // }
       /* Put tx timestamp into transmit descriptor */
       pkts[i]->ol_flags |= inf->tx_launch_time_flag;
       *RTE_MBUF_DYNFIELD(pkts[i], inf->tx_dynfield_offset, uint64_t*) = target_ptp;
