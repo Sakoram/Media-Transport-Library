@@ -13,7 +13,7 @@
 #include "mt_stat.h"
 #include "mt_util.h"
 
-#define MT_PTP_USE_TX_TIME_STAMP (1)
+#define MT_PTP_USE_TX_TIME_STAMP (0)
 #define MT_PTP_USE_TX_TIMER (1)
 #define MT_PTP_CHECK_TX_TIME_STAMP (0)
 #define MT_PTP_CHECK_RX_TIME_STAMP (0)
@@ -885,7 +885,8 @@ static void ptp_delay_req_task(struct mt_ptp_impl* ptp) {
 // #endif
 
   // mt_mbuf_dump(port, 0, "PTP_DELAY_REQ", m);
-  uint16_t tx = mt_sys_queue_tx_burst(ptp->impl, port, &m, 1);
+  // err("%s(%d), leci request !!!\n", __func__, port);
+  uint16_t tx = mt_sys_queue_tx_burst(ptp->impl, port, &m, 1, &tx_ns);
   if (tx < 1) {
     rte_pktmbuf_free(m);
     err("%s(%d), tx fail\n", __func__, port);
@@ -896,7 +897,12 @@ static void ptp_delay_req_task(struct mt_ptp_impl* ptp) {
 #endif
 
 #if MT_PTP_USE_TX_TIME_STAMP
-  if (ptp->qbv_enabled) {
+  if (tx_ns) {
+#if MT_PTP_CHECK_HW_SW_DELTA
+    info("%s(%d), t3 hw-sw delta %" PRId64 "\n", __func__, ptp->port, tx_ns - burst_time);
+#endif
+    ptp->t3 = tx_ns;
+  } else if (ptp->qbv_enabled) {
     /*
      * The DELAY_REQ packet will be blocked max 1.2ms by Qbv scheduler.
      * The Tx timestamp will not be created immediately. So, start an

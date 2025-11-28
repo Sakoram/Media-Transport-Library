@@ -8,6 +8,7 @@
 #include "../dev/mt_dev.h"
 #include "../dev/mt_rdma_ud.h"
 #include "../mt_cni.h"
+#include "../mt_ptp.h"
 #include "../mt_log.h"
 #include "mt_dp_socket.h"
 #include "mt_shared_queue.h"
@@ -335,6 +336,7 @@ int mt_dp_queue_init(struct mtl_main_impl* impl) {
     struct mt_txq_flow flow;
     memset(&flow, 0, sizeof(flow));
     flow.flags = MT_TXQ_FLOW_F_SYS_QUEUE;
+    // flow.flags |= MT_TXQ_FLOW_F_LAUNCH_TIME;
     if (mt_drv_kernel_based(impl, i) && !mt_pmd_is_native_af_xdp(impl, i) &&
         !mt_pmd_is_rdma_ud(impl, i))
       flow.flags = MT_TXQ_FLOW_F_FORCE_SOCKET;
@@ -380,13 +382,62 @@ int mt_dp_queue_uinit(struct mtl_main_impl* impl) {
   return 0;
 }
 
+#define MT_SYS_LAUNCH_TIME_GUARD_NS 1000
+#define MT_SYS_LAUNCH_TIME_STEP_NS 32
+
+static inline uint64_t mt_sys_queue_ptp_now(struct mtl_main_impl* impl,
+                                            enum mtl_port port) {
+  struct mt_interface* inf = mt_if(impl, port);
+  struct mt_ptp_impl* ptp = mt_get_ptp(impl, port);
+
+  if (inf && ptp && ptp->active && !ptp->no_timesync) {
+    struct timespec spec;
+    memset(&spec, 0, sizeof(spec));
+    if (!rte_eth_timesync_read_time(inf->port_id, &spec))
+      return mt_timespec_to_ns(&spec);
+    uint64_t raw = mt_get_raw_ptp_time(impl, port);
+    if (raw) return raw;
+  }
+
+  return mt_get_ptp_time(impl, port);
+}
+
 uint16_t mt_sys_queue_tx_burst(struct mtl_main_impl* impl, enum mtl_port port,
-                               struct rte_mbuf** tx_pkts, uint16_t nb_pkts) {
+                               struct rte_mbuf** tx_pkts, uint16_t nb_pkts,
+                               uint64_t* launch_time_ns) {
   struct mt_dp_impl* dp = impl->dp[port];
+
+  if (launch_time_ns) *launch_time_ns = 0;
 
   if (!dp->txq_sys_entry) {
     err("%s(%d), txq sys queue not active\n", __func__, port);
     return 0;
+  }
+
+  struct mt_interface* inf = mt_if(impl, port);
+  bool txpp_enabled =
+    (inf->feature & MT_IF_FEATURE_TX_OFFLOAD_SEND_ON_TIMESTAMP) &&
+    (inf->tx_dynfield_offset >= 0) && inf->tx_launch_time_flag;
+
+  if (txpp_enabled && nb_pkts) {
+    /* Guard window keeps the programmed time safely ahead of now. */
+    // uint64_t base_time = mt_sys_queue_ptp_now(impl, port) + MT_SYS_LAUNCH_TIME_GUARD_NS;
+    // if (launch_time_ns) *launch_time_ns = base_time;
+
+    for (uint16_t i = 0; i < nb_pkts; i++) {
+      struct rte_mbuf* mbuf = tx_pkts[i];
+      if (!mbuf) continue;
+      // uint64_t pkt_time = base_time + (uint64_t)i * MT_SYS_LAUNCH_TIME_STEP_NS;
+      // uint64_t cur_ptp = mt_get_ptp_time(impl, port);
+      // static int ptp_log_counter;
+
+      // int64_t ptp_diff = (int64_t)pkt_time - (int64_t)cur_ptp;
+      //   err("%s, #@#@#@#@ cur_ptp %" PRIu64 " target_ptp %" PRIu64 " diff %" PRId64 "\n",
+      //   __func__, cur_ptp, pkt_time, ptp_diff);
+      err("%s(%d), #@#@#@#@ system txpp packet %u prepared\n", __func__, port, i);
+      mbuf->ol_flags |= inf->tx_launch_time_flag;
+      *RTE_MBUF_DYNFIELD(mbuf, inf->tx_dynfield_offset, uint64_t*) = 0;//pkt_time;
+    }
   }
 
   uint16_t tx;

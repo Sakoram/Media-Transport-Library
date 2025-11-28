@@ -293,7 +293,7 @@ static int app_tx_st20p_init(struct st_app_context* ctx, st_json_st20p_session_t
   ops.transport_packing = st20p ? st20p->info.transport_packing : ST20_PACKING_BPM;
   ops.transport_fmt = st20p ? st20p->info.transport_format : ST20_FMT_YUV_422_10BIT;
   ops.device = st20p ? st20p->info.device : ST_PLUGIN_DEVICE_AUTO;
-  ops.framebuff_cnt = 2;
+  ops.framebuff_cnt = 5;
   ops.flags |= ST20P_TX_FLAG_BLOCK_GET;
   ops.start_vrx = ctx->tx_start_vrx;
   ops.pad_interval = ctx->tx_pad_interval;

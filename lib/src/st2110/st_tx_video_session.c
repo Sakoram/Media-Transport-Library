@@ -632,7 +632,7 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
   uint64_t cur_tai = mt_get_ptp_time(impl, MTL_PORT_P);
   uint64_t cur_tsc = mt_get_tsc(impl);
   uint64_t start_time_tai;
-  uint64_t time_to_tx_ns;
+  int64_t time_to_tx_ns;
 
   if (required_tai) {
     required_tai = validate_and_adjust_user_timestamp(s, required_tai, cur_tai);
@@ -645,6 +645,13 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
     start_time_tai = transmission_start_time(pacing, pacing->cur_epochs);
   }
   time_to_tx_ns = start_time_tai - cur_tai;
+  err("____________________________________________\n");
+  // err("%s(%d), start_time_tai %" PRIu64 "\n", __func__, s->idx, start_time_tai);
+  err("%s(%d), cur_tai %" PRIu64 "\n", __func__, s->idx, cur_tai);
+  // err("%s(%d), cur_tsc %" PRIu64 "\n", __func__, s->idx, cur_tsc);
+  err("%s(%d), time_to_tx_ns %" PRIi64 "\n", __func__, s->idx, time_to_tx_ns);
+  err("%s(%d), tai_from_frame_count %" PRIu64 "\n", __func__, s->idx, tai_from_frame_count(pacing,  pacing->cur_epochs));
+  err("%s(%d), pacing->cur_epochs %" PRIu64 "\n", __func__, s->idx, pacing->cur_epochs);
 
   if (time_to_tx_ns < 0) {
     /* should never happen */
@@ -1672,6 +1679,16 @@ static int tv_usdt_dump_frame(struct mtl_main_impl* impl,
   return 0;
 }
 
+static inline void tv_tasklet_time_mark(struct mtl_main_impl* impl,
+                                        struct st_tx_video_session_impl* s,
+                                        const char* caller, const char* label,
+                                        uint64_t func_tsc_start) {
+  uint64_t now_ptp = mt_get_ptp_time(impl, MTL_PORT_P);
+  uint64_t elapsed_us = (mt_get_tsc(impl) - func_tsc_start) / NS_PER_US;
+  // warn("%s(%d), time mark %s ptp %" PRIu64 " elapsed %" PRIu64 "us\n", caller,
+  //      s->idx, label, now_ptp, elapsed_us);
+}
+
 static int tv_tasklet_frame(struct mtl_main_impl* impl,
                             struct st_tx_video_session_impl* s) {
   unsigned int bulk = s->bulk;
@@ -1687,9 +1704,16 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
   struct rte_ring* ring_p = s->ring[MTL_SESSION_PORT_P];
   struct rte_ring* ring_r = NULL;
   int num_port = ops->num_port;
+  uint64_t func_tsc_start = mt_get_tsc(impl);
+
+  // tv_tasklet_time_mark(impl, s, __func__, "enter", func_tsc_start);
 
   if (rte_ring_full(ring_p)) {
     s->stat_build_ret_code = -STI_FRAME_RING_FULL;
+    // warn("%s(%d), primary ring full (count %u, free %u) bulk %u pkt_idx %u\n",
+    //      __func__, idx, rte_ring_count(ring_p), rte_ring_free_count(ring_p), bulk,
+    //      s->st20_pkt_idx);
+    // tv_tasklet_time_mark(impl, s, __func__, "ring_full", func_tsc_start);
     return MTL_TASKLET_ALL_DONE;
   }
 
@@ -1707,6 +1731,9 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       s->inflight[MTL_SESSION_PORT_P][0] = NULL;
     } else {
       s->stat_build_ret_code = -STI_FRAME_INFLIGHT_ENQUEUE_FAIL;
+      // warn("%s(%d), primary inflight enqueue failed (ring count %u) bulk %u\n",
+      //      __func__, idx, rte_ring_count(ring_p), bulk);
+      // tv_tasklet_time_mark(impl, s, __func__, "inflight_p_fail", func_tsc_start);
       return MTL_TASKLET_ALL_DONE;
     }
   }
@@ -1717,32 +1744,38 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       s->inflight[MTL_SESSION_PORT_R][0] = NULL;
     } else {
       s->stat_build_ret_code = -STI_FRAME_INFLIGHT_R_ENQUEUE_FAIL;
+      warn("%s(%d), redundant inflight enqueue failed (ring count %u) bulk %u\n",
+           __func__, idx, rte_ring_count(ring_r), bulk);
+      tv_tasklet_time_mark(impl, s, __func__, "inflight_r_fail", func_tsc_start);
       return MTL_TASKLET_ALL_DONE;
     }
   }
+
+  tv_tasklet_time_mark(impl, s, __func__, "post_inflight", func_tsc_start);
 
   if (0 == s->st20_pkt_idx) {
     if (ST21_TX_STAT_WAIT_FRAME == s->st20_frame_stat) {
       uint16_t next_frame_idx = 0;
       struct st20_tx_frame_meta meta;
-      uint64_t tsc_start = 0;
+      uint64_t tsc_start = mt_get_tsc(impl);
 
       tv_init_next_meta(s, &meta);
       /* Query next frame buffer idx */
       bool time_measure = mt_sessions_time_measure(impl);
-      if (time_measure) tsc_start = mt_get_tsc(impl);
       ret = ops->get_next_frame(ops->priv, &next_frame_idx, &meta);
+      uint32_t delta_us = (mt_get_tsc(impl) - tsc_start) / NS_PER_US;
       if (time_measure) {
-        uint32_t delta_us = (mt_get_tsc(impl) - tsc_start) / NS_PER_US;
         s->stat_max_next_frame_us = RTE_MAX(s->stat_max_next_frame_us, delta_us);
       }
       if (ret < 0) { /* no frame ready from app */
         if (s->stat_user_busy_first) {
           ST_SESSION_STAT_INC(s, port_user_stats, stat_user_busy);
           s->stat_user_busy_first = false;
-          dbg("%s(%d), get_next_frame fail %d\n", __func__, idx, ret);
+          warn("%s(%d), get_next_frame busy ret %d after %uus (ring %u)\n", __func__,
+               idx, ret, delta_us, rte_ring_count(ring_p));
         }
         s->stat_build_ret_code = -STI_FRAME_APP_GET_FRAME_BUSY;
+        tv_tasklet_time_mark(impl, s, __func__, "wait_frame_busy", func_tsc_start);
         return MTL_TASKLET_ALL_DONE;
       }
       /* check frame refcnt */
@@ -1752,6 +1785,7 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
         err("%s(%d), frame %u refcnt not zero %d\n", __func__, idx, next_frame_idx,
             refcnt);
         s->stat_build_ret_code = -STI_FRAME_APP_ERR_TX_FRAME;
+        tv_tasklet_time_mark(impl, s, __func__, "frame_refcnt", func_tsc_start);
         return MTL_TASKLET_ALL_DONE;
       }
       frame->tv_meta = meta;
@@ -1762,6 +1796,8 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
           err("%s(%d), frame %u user meta size %" PRId64 " too large\n", __func__, idx,
               next_frame_idx, meta.user_meta_size);
           s->stat_build_ret_code = -STI_FRAME_APP_ERR_USER_META;
+          tv_tasklet_time_mark(impl, s, __func__, "user_meta_too_large",
+                               func_tsc_start);
           return MTL_TASKLET_ALL_DONE;
         }
         ST_SESSION_STAT_INC(s, port_user_stats, stat_user_meta_cnt);
@@ -1777,6 +1813,8 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       s->st20_frame_lines_ready = 0;
       dbg("%s(%d), next_frame_idx %d start\n", __func__, idx, next_frame_idx);
       s->st20_frame_stat = ST21_TX_STAT_SENDING_PKTS;
+      info("%s(%d), frame %u ready in %uus (pkt_len %u)\n", __func__, idx,
+           next_frame_idx, delta_us, s->st20_pkt_len);
 
       /* user timestamp control if any */
       uint64_t required_tai = tv_pacing_required_tai(s, meta.tfmt, meta.timestamp);
@@ -1825,6 +1863,8 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
     }
   }
 
+  tv_tasklet_time_mark(impl, s, __func__, "after_frame_fetch", func_tsc_start);
+
   if (ops->type == ST20_TYPE_SLICE_LEVEL) {
     uint16_t line_number = 0;
     if (ops->packing == ST20_PACKING_GPM_SL) {
@@ -1848,12 +1888,17 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       if ((ret < 0) || (line_number >= s->st20_frame_lines_ready)) {
         dbg("%s(%d), line %u not ready, ready lines %u\n", __func__, s->idx, line_number,
             s->st20_frame_lines_ready);
+         warn("%s(%d), waiting for slice line %u (ready %u) frame %u\n", __func__,
+           s->idx, line_number, s->st20_frame_lines_ready, s->st20_frame_idx);
         ST_SESSION_STAT_INC(s, port_user_stats, stat_lines_not_ready);
         s->stat_build_ret_code = -STI_FRAME_APP_SLICE_NOT_READY;
-        return MTL_TASKLET_ALL_DONE;
+         tv_tasklet_time_mark(impl, s, __func__, "slice_not_ready", func_tsc_start);
+         return MTL_TASKLET_ALL_DONE;
       }
     }
   }
+
+  tv_tasklet_time_mark(impl, s, __func__, "after_slice_check", func_tsc_start);
 
   struct rte_mbuf* pkts[bulk];
   struct rte_mbuf* pkts_r[bulk];
@@ -1862,7 +1907,10 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
   ret = rte_pktmbuf_alloc_bulk(hdr_pool_p, pkts, bulk);
   if (ret < 0) {
     dbg("%s(%d), pkts alloc fail %d\n", __func__, idx, ret);
+    err("%s(%d), hdr_pool_p low (avail %u in_use %u) bulk %u\n", __func__, idx,
+         rte_mempool_avail_count(hdr_pool_p), rte_mempool_in_use_count(hdr_pool_p), bulk);
     s->stat_build_ret_code = -STI_FRAME_PKT_ALLOC_FAIL;
+    tv_tasklet_time_mark(impl, s, __func__, "alloc_hdr_p_fail", func_tsc_start);
     return MTL_TASKLET_ALL_DONE;
   }
 
@@ -1871,7 +1919,11 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
     if (ret < 0) {
       dbg("%s(%d), pkts chain alloc fail %d\n", __func__, idx, ret);
       rte_pktmbuf_free_bulk(pkts, bulk);
+      err("%s(%d), chain_pool low (avail %u in_use %u) bulk %u\n", __func__, idx,
+           rte_mempool_avail_count(chain_pool), rte_mempool_in_use_count(chain_pool),
+           bulk);
       s->stat_build_ret_code = -STI_FRAME_PKT_ALLOC_CHAIN_FAIL;
+      tv_tasklet_time_mark(impl, s, __func__, "alloc_chain_fail", func_tsc_start);
       return MTL_TASKLET_ALL_DONE;
     }
   }
@@ -1882,10 +1934,16 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       dbg("%s(%d), pkts_r alloc fail %d\n", __func__, idx, ret);
       rte_pktmbuf_free_bulk(pkts, bulk);
       if (!s->tx_no_chain) rte_pktmbuf_free_bulk(pkts_chain, bulk);
+      err("%s(%d), hdr_pool_r low (avail %u in_use %u) bulk %u\n", __func__, idx,
+           rte_mempool_avail_count(hdr_pool_r), rte_mempool_in_use_count(hdr_pool_r),
+           bulk);
       s->stat_build_ret_code = -STI_FRAME_PKT_ALLOC_R_FAIL;
+      tv_tasklet_time_mark(impl, s, __func__, "alloc_hdr_r_fail", func_tsc_start);
       return MTL_TASKLET_ALL_DONE;
     }
   }
+
+  tv_tasklet_time_mark(impl, s, __func__, "after_alloc", func_tsc_start);
 
   for (unsigned int i = 0; i < bulk; i++) {
     st_tx_mbuf_set_priv(pkts[i], &s->st20_frames[s->st20_frame_idx]);
@@ -1924,12 +1982,16 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
     s->st20_pkt_idx++;
   }
 
+  tv_tasklet_time_mark(impl, s, __func__, "after_build", func_tsc_start);
+
   bool done = false;
   n = rte_ring_sp_enqueue_bulk(ring_p, (void**)&pkts[0], bulk, NULL);
   if (n == 0) {
     for (unsigned int i = 0; i < bulk; i++) s->inflight[MTL_SESSION_PORT_P][i] = pkts[i];
     s->inflight_cnt[MTL_SESSION_PORT_P]++;
     s->stat_build_ret_code = -STI_FRAME_PKT_ENQUEUE_FAIL;
+    // err("%s(%d), primary ring enqueue failed (count %u, free %u) bulk %u\n", __func__,
+    //      idx, rte_ring_count(ring_p), rte_ring_free_count(ring_p), bulk);
     done = true;
   }
   if (send_r) {
@@ -1939,9 +2001,13 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
         s->inflight[MTL_SESSION_PORT_R][i] = pkts_r[i];
       s->inflight_cnt[MTL_SESSION_PORT_R]++;
       s->stat_build_ret_code = -STI_FRAME_PKT_R_ENQUEUE_FAIL;
+      err("%s(%d), redundant ring enqueue failed (count %u, free %u) bulk %u\n",
+           __func__, idx, rte_ring_count(ring_r), rte_ring_free_count(ring_r), bulk);
       done = true;
     }
   }
+
+  tv_tasklet_time_mark(impl, s, __func__, "after_enqueue", func_tsc_start);
 
   if (s->st20_pkt_idx >= s->st20_total_pkts) {
     dbg("%s(%d), frame %d done with %d pkts\n", __func__, idx, s->st20_frame_idx,
@@ -1959,13 +2025,22 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
     }
 
     uint64_t frame_end_time = mt_get_tsc(impl);
+    int64_t frame_margin_us =
+      (int64_t)(pacing->tsc_time_cursor - frame_end_time) / NS_PER_US;
+    if (frame_margin_us >= 0) {
+      err("%s(%d), frame %d finished with %ldus slack\n", __func__, idx,
+        s->st20_frame_idx, frame_margin_us);
+    }
     if (frame_end_time > pacing->tsc_time_cursor) {
       ST_SESSION_STAT_INC(s, port_user_stats.common, stat_exceed_frame_time);
       rte_atomic32_inc(&s->cbs_build_timeout);
-      dbg("%s(%d), frame %d build time out %ldus\n", __func__, idx, s->st20_frame_idx,
+      err("%s(%d), frame %d build time out %ldus\n", __func__, idx, s->st20_frame_idx,
           (frame_end_time - pacing->tsc_time_cursor) / NS_PER_US);
     }
   }
+
+  tv_tasklet_time_mark(impl, s, __func__, done ? "exit_done" : "exit_pending",
+                       func_tsc_start);
 
   return done ? MTL_TASKLET_ALL_DONE : MTL_TASKLET_HAS_PENDING;
 }
@@ -4025,7 +4100,7 @@ int st20_frame_tx_start(struct mtl_main_impl* impl, struct st_tx_video_session_i
 
   uint16_t send = mt_drv_no_sys_txq(impl, port)
                       ? mt_txq_burst_busy(s->queue[s_port], &pkt, 1, 10)
-                      : mt_sys_queue_tx_burst(impl, port, &pkt, 1);
+                      : mt_sys_queue_tx_burst(impl, port, &pkt, 1, NULL);
   if (send < 1) {
     err("%s(%d), tx fail\n", __func__, port);
     rte_pktmbuf_free(pkt);

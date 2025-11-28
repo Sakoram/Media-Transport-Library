@@ -337,6 +337,8 @@ struct st_tx_video_session_impl {
   unsigned int trs_inflight_num2[MTL_SESSION_PORT_MAX];
   unsigned int trs_inflight_idx2[MTL_SESSION_PORT_MAX];
   int trs_inflight_cnt2[MTL_SESSION_PORT_MAX]; /* for stats */
+  uint64_t trs_rl_tasklet_exec_cnt[MTL_SESSION_PORT_MAX];
+  uint64_t trs_launch_tasklet_exec_cnt[MTL_SESSION_PORT_MAX];
 
   /* the last burst succ time(tsc) */
   uint64_t last_burst_succ_time_tsc[MTL_SESSION_PORT_MAX];

@@ -153,6 +153,8 @@ static int video_burst_packet(struct mtl_main_impl* impl,
   int pkt_idx = st_tx_mbuf_get_idx(pkts[0]);
 
   if (tx < bulk) {
+    err("%s(%d,%d), ##### burst only %d/%u pkts idx %d\n", __func__, s->idx, s_port, tx,
+      bulk, pkt_idx);
     unsigned int i;
     unsigned int remaining = bulk - tx;
 
@@ -187,6 +189,7 @@ static int _video_trs_rl_tasklet(struct mtl_main_impl* impl,
   int idx = s->idx;
   unsigned int n, tx;
   uint32_t pkt_idx = 0;
+  s->trs_rl_tasklet_exec_cnt[s_port]++;
 
   /* check if any inflight pkts in transmitter inflight 2 */
   if (s->trs_inflight_num2[s_port] > 0) {
@@ -278,8 +281,11 @@ static int _video_trs_rl_tasklet(struct mtl_main_impl* impl,
     video_burst_packet(impl, s, s_port, pkts, valid_bulk, false);
     rte_pktmbuf_free_bulk(&pkts[valid_bulk], bulk - valid_bulk);
     s->stat_pkts_burst_dummy += bulk - valid_bulk;
-    dbg("%s(%d), pkt_idx %" PRIu64 " ts %" PRIu64 "\n", __func__, idx, (uint64_t)pkt_idx,
-        st_tx_mbuf_get_tsc(pkts[0]));
+    uint64_t exec_cnt = s->trs_rl_tasklet_exec_cnt[s_port];
+    s->trs_rl_tasklet_exec_cnt[s_port] = 0;
+    warn("%s(%d), pkt_idx %" PRIu64 " ts %" PRIu64
+         ", rl_tasklet_runs_since_last_log %" PRIu64 "\n",
+         __func__, idx, (uint64_t)pkt_idx, st_tx_mbuf_get_tsc(pkts[0]), exec_cnt);
     *ret_status = -STI_RLTRS_BURST_HAS_DUMMY;
     return MTL_TASKLET_HAS_PENDING;
   }
@@ -368,8 +374,8 @@ static int video_trs_tsc_tasklet(struct mtl_main_impl* impl,
         return delta < mt_sch_schedule_ns(impl) ? MTL_TASKLET_HAS_PENDING
                                                 : MTL_TASKLET_ALL_DONE;
       } else {
-        err("%s(%d), invalid trs tsc cur %" PRIu64 " target %" PRIu64 "\n", __func__, idx,
-            cur_tsc, target_tsc);
+        // err("%s(%d), invalid trs tsc cur %" PRIu64 " target %" PRIu64 "\n", __func__, idx,
+        //     cur_tsc, target_tsc);
       }
     }
     s->trs_target_tsc[s_port] = 0;
@@ -433,11 +439,11 @@ static int video_trs_tsc_tasklet(struct mtl_main_impl* impl,
         return delta < mt_sch_schedule_ns(impl) ? MTL_TASKLET_HAS_PENDING
                                                 : MTL_TASKLET_ALL_DONE;
       } else {
-          static int error_count = 0;
-        if (error_count++ % 200 == 0) {
-        err("%s(%d), invalid tsc cur %" PRIu64 " target %" PRIu64 "\n", __func__, idx,
-            cur_tsc, target_tsc);
-        }
+        //   static int error_count = 0;
+        // if (error_count++ % 200 == 0) {
+        // err("%s(%d), invalid tsc cur %" PRIu64 " target %" PRIu64 "\n", __func__, idx,
+        //     cur_tsc, target_tsc);
+        // }
       }
     }
   }
@@ -468,10 +474,12 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
   uint64_t target_ptp;
   enum mtl_port port = mt_port_logic2phy(s->port_maps, s_port);
   struct mt_interface* inf = mt_if(impl, port);
+  s->trs_launch_tasklet_exec_cnt[s_port]++;
 
   if (!mt_ptp_is_locked(impl, MTL_PORT_P)) {
     /* fallback to tsc if ptp is not synced */
-    return video_trs_tsc_tasklet(impl, s, s_port);
+    // return video_trs_tsc_tasklet(impl, s, s_port);
+    return MTL_TASKLET_ALL_DONE;
   }
 
   /* check if any inflight pkts in transmitter */
@@ -504,6 +512,19 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
   uint32_t pkt_idx;
   for (i = 0; i < bulk; i++) {
     pkt_idx = st_tx_mbuf_get_idx(pkts[i]);
+    if (!pkt_idx || pkt_idx > 4113) {
+      uint64_t cur_ptp = mt_get_ptp_time(impl, port);
+      uint64_t exec_cnt = s->trs_launch_tasklet_exec_cnt[s_port];
+      s->trs_launch_tasklet_exec_cnt[s_port] = 0;
+      if (!pkt_idx)
+        err("%s(%d,%d), unexpected pkt idx 0 cur_ptp %" PRIu64
+            ", launch_tasklet_runs_since_last_log %" PRIu64 "\n",
+            __func__, s->idx, s_port, cur_ptp, exec_cnt);
+      else
+        err("%s(%d,%d), pkt idx %u over 4100 cur_ptp %" PRIu64
+            ", launch_tasklet_runs_since_last_log %" PRIu64 "\n",
+            __func__, s->idx, s_port, pkt_idx, cur_ptp, exec_cnt);
+    }
     if (pkt_idx == ST_TX_DUMMY_PKT_IDX) {
       valid_bulk = i;
       break;
@@ -519,7 +540,7 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
       target_ptp = st_tx_mbuf_get_ptp(pkts[i]);
       // uint64_t cur_ptp = mt_get_ptp_time(impl, port);
       // static int ptp_log_counter;
-      // if (ptp_log_counter++ % 50 == 0) {
+      // if (ptp_log_counter++ % 10000 == 0) {
       //   int64_t ptp_diff = (int64_t)target_ptp - (int64_t)cur_ptp;
       //   err("%s(%d,%d), cur_ptp %" PRIu64 " target_ptp %" PRIu64 " diff %" PRId64 "\n",
       //   __func__, s->idx, s_port, cur_ptp, target_ptp, ptp_diff);
@@ -532,6 +553,8 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
     tx = video_trs_burst(impl, s, s_port, &pkts[0], valid_bulk);
 
     if (tx < valid_bulk) {
+          err("%s(%d,%d), ##### burst only %d/%u pkts idx %d\n", __func__, s->idx, s_port, tx,
+      valid_bulk, pkt_idx);
       unsigned int remaining = valid_bulk - tx;
 
       s->trs_inflight_num[s_port] = remaining;
