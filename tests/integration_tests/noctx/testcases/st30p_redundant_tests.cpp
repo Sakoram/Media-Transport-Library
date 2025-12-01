@@ -8,7 +8,7 @@
 #include "strategies/st30p_strategies.hpp"
 
 TEST_F(NoCtxTest, st30p_redundant_latency) {
-  ctx->para.ptp_get_time_fn = NoCtxTest::TestPtpSourceSinceEpoch;
+    ctx->para.ptp_get_time_fn = NoCtxTest::FakePtpClockNow;
   ctx->para.log_level = MTL_LOG_LEVEL_INFO;
   ctx->para.flags |= MTL_FLAG_DEV_AUTO_START_STOP;
 
@@ -80,11 +80,11 @@ TEST_F(NoCtxTest, st30p_redundant_latency) {
     [sessionTxRedundantLatencySideId]: Tx ---> Rx [sessionTxRedundantLatencySideId]
   */
 
+  StartFakePtpClock();
   st30pHandlers[sessionRxSideId]->startSessionRx();
   st30pHandlers[sessionTxPrimarySideId]->startSessionTx();
   st30pHandlers[sessionTxRedundantLatencySideId]->startSessionTx();
-  TestPtpSourceSinceEpoch(nullptr);  // reset ptp time to 0
-  mtl_start(ctx->handle);
+
   sleepUntilFailure();
 
   mtl_stop(ctx->handle);
@@ -113,7 +113,7 @@ TEST_F(NoCtxTest, st30p_redundant_latency) {
 }
 
 TEST_F(NoCtxTest, st30p_redundant_latency2) {
-  ctx->para.ptp_get_time_fn = NoCtxTest::TestPtpSourceSinceEpoch;
+    ctx->para.ptp_get_time_fn = NoCtxTest::FakePtpClockNow;
   ctx->para.log_level = MTL_LOG_LEVEL_INFO;
   ctx->para.flags |= MTL_FLAG_DEV_AUTO_START_STOP;
 
@@ -189,11 +189,10 @@ TEST_F(NoCtxTest, st30p_redundant_latency2) {
     [sessionTxRedundantLatencySideId]: Tx ---> Rx [sessionTxRedundantLatencySideId]
   */
 
+  StartFakePtpClock();
   st30pHandlers[sessionRxSideId]->startSessionRx();
   st30pHandlers[sessionTxPrimarySideId]->startSessionTx();
   st30pHandlers[sessionTxRedundantLatencySideId]->startSessionTx();
-  TestPtpSourceSinceEpoch(nullptr);  // reset ptp time to 0
-  mtl_start(ctx->handle);
   sleepUntilFailure(10);
 
   st30pHandlers[sessionTxPrimarySideId]->stopSession();

@@ -12,7 +12,7 @@ TEST_F(NoCtxTest, st20p_redundant_latency) {
     throw std::runtime_error("st20p_redundant_latency test ctx needs at least 4 ports");
   }
 
-  initSt20pDefaultContext();
+  initDefaultContext();
 
   uint testedLatencyMs = 10;
 
@@ -61,6 +61,7 @@ TEST_F(NoCtxTest, st20p_redundant_latency) {
     [latencyBundle]:          Tx ---> Rx [latencyBundle]
   */
 
+  StartFakePtpClock();  // start ptp clock reference
   rxBundle.handler->startSessionRx();
   ASSERT_TRUE(waitForSession(rxBundle.handler->session));
   primaryBundle.handler->startSessionTx();
@@ -68,8 +69,6 @@ TEST_F(NoCtxTest, st20p_redundant_latency) {
   latencyBundle.handler->startSessionTx();
   ASSERT_TRUE(waitForSession(latencyBundle.handler->session));
 
-  TestPtpSourceSinceEpoch(nullptr);  // reset ptp time to 0
-  mtl_start(ctx->handle);
   sleepUntilFailure(30);
 
   mtl_stop(ctx->handle);
