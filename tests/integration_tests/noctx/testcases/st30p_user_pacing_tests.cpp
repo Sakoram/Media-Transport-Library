@@ -47,6 +47,7 @@ TEST_F(NoCtxTest, st30p_user_pacing) {
   strategy->initializeTiming(handler);
 
   StartFakePtpClock();
+  mtl_start(ctx->handle);
   handler->startSession();
 
   sleepUntilFailure();

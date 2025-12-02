@@ -94,14 +94,10 @@ void NoCtxTest::TearDown() {
 uint64_t NoCtxTest::FakePtpClockNow(void* priv) {
   (void)priv;
   if (!g_test_ptp_clock.running.load(std::memory_order_acquire)) {
-    return 0;
+    StartFakePtpClock();
   }
 
   const uint64_t start = g_test_ptp_clock.start_ns.load(std::memory_order_acquire);
-  if (start == 0) {
-    return 0;
-  }
-
   const uint64_t now = monotonicNowNs();
   if (now <= start) {
     return 0;
@@ -123,7 +119,7 @@ void NoCtxTest::sleepUntilFailure(int sleep_duration) {
     sleep_duration = defaultTestDuration;
   }
 
-  for (int i = 0; i < sleep_duration; ++i) {
+  for (int i = 0; i < sleep_duration * 10; ++i) {
     if (HasFailure()) break;
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
@@ -275,7 +271,7 @@ void NoCtxTest::initDefaultContext() {
 
   ctx->para.ptp_get_time_fn = NoCtxTest::FakePtpClockNow;
   ctx->para.log_level = MTL_LOG_LEVEL_INFO;
-  ctx->para.flags|= MTL_FLAG_DEV_AUTO_START_STOP;
+  ctx->para.flags &= ~MTL_FLAG_DEV_AUTO_START_STOP;
   ctx->handle = mtl_init(&ctx->para);
   ASSERT_TRUE(ctx->handle != nullptr);
 }

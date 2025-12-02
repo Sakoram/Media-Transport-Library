@@ -61,7 +61,6 @@ TEST_F(NoCtxTest, st20p_redundant_latency) {
     [latencyBundle]:          Tx ---> Rx [latencyBundle]
   */
 
-  StartFakePtpClock();  // start ptp clock reference
   rxBundle.handler->startSessionRx();
   ASSERT_TRUE(waitForSession(rxBundle.handler->session));
   primaryBundle.handler->startSessionTx();
@@ -69,9 +68,13 @@ TEST_F(NoCtxTest, st20p_redundant_latency) {
   latencyBundle.handler->startSessionTx();
   ASSERT_TRUE(waitForSession(latencyBundle.handler->session));
 
+  StartFakePtpClock();  // reset ptp time to 0
+  mtl_start(ctx->handle);
   sleepUntilFailure(30);
 
-  mtl_stop(ctx->handle);
+  latencyBundle.handler->session.stop();
+  primaryBundle.handler->session.stop();
+  rxBundle.handler->session.stop();
 
   st20_rx_user_stats stats;
   st20p_rx_get_session_stats(rxBundle.handler->sessionsHandleRx, &stats);
@@ -92,7 +95,4 @@ TEST_F(NoCtxTest, st20p_redundant_latency) {
   ASSERT_NEAR(framesSend, framesRecieved, framesSend / 100)
       << "Comparison against primary stream";
 
-  primaryBundle.handler->session.stop();
-  latencyBundle.handler->session.stop();
-  rxBundle.handler->session.stop();
 }

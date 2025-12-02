@@ -17,6 +17,7 @@ TEST_F(NoCtxTest, st20p_default_timestamps) {
 
   StartFakePtpClock();
   bundle.handler->startSession();
+  mtl_start(ctx->handle);
 
   sleepUntilFailure();
   bundle.handler->stopSession();
@@ -39,6 +40,7 @@ TEST_F(NoCtxTest, st20p_user_pacing) {
 
   StartFakePtpClock();
   bundle.handler->startSession();
+  mtl_start(ctx->handle);
 
   ASSERT_EQ(frameTestStrategy->getPacingParameters(), 0);
   EXPECT_GT(frameTestStrategy->pacing_tr_offset_ns, 0.0);
@@ -74,6 +76,7 @@ TEST_F(NoCtxTest, st20p_user_pacing_offset_jitter) {
 
   StartFakePtpClock();
   bundle.handler->startSession();
+  mtl_start(ctx->handle);
 
   ASSERT_EQ(strategy->getPacingParameters(), 0);
   EXPECT_GT(strategy->pacing_tr_offset_ns, 0.0);

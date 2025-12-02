@@ -138,5 +138,5 @@ void St40pUserTimestamp::initializeTiming(St40pHandler* handler) {
     frameTimeNs = static_cast<long double>(NS_PER_S) / 25.0;
   }
 
-  startingTime = frameTimeNs * 1.0;
+  startingTime = frameTimeNs * 70.0;
 }

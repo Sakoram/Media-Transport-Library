@@ -315,10 +315,12 @@ static int tx_ancillary_session_sync_pacing(struct mtl_main_impl* impl,
     ST_SESSION_STAT_ADD(s, port_user_stats.common, stat_epoch_onward,
                         (next_epochs - epochs));
   }
-
   pacing->cur_epochs = epochs;
+  // err("%s(%d), ###@@@###@@@  pacing->cur_epochs  %u\n", __func__, s->idx,  pacing->cur_epochs );
   pacing->cur_epoch_time = tx_ancillary_pacing_time(pacing, epochs);
+  // err("%s(%d), ###@@@###@@@  pacing->cur_epoch_time %u\n", __func__, s->idx,  pacing->cur_epoch_time);
   pacing->pacing_time_stamp = tx_ancillary_pacing_time_stamp(pacing, epochs);
+  // err("%s(%d), ###@@@###@@@ pacing_time_stamp %u\n", __func__, s->idx, pacing->pacing_time_stamp);
   pacing->rtp_time_stamp = pacing->pacing_time_stamp;
   pacing->tsc_time_cursor = (double)mt_get_tsc(impl) + to_epoch;
   dbg("%s(%d), epochs %" PRIu64 " time_stamp %u time_cursor %f to_epoch %f\n", __func__,
