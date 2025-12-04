@@ -909,8 +909,14 @@ bool st_frame_fmt_equal_transport(enum st_frame_fmt fmt, enum st20_fmt tfmt) {
 static uint64_t st_muldiv_u64_round_closest(uint64_t value, uint64_t multiplier,
                                             uint64_t divisor) {
   /* keep conversions reproducible without relying on floating point */
-  __uint128_t product = (__uint128_t)value * multiplier + divisor / 2;
-  return (uint64_t)(product / divisor);
+  __uint128_t product = (__uint128_t)value * multiplier;
+  __uint128_t quotient = product / divisor;
+  __uint128_t remainder = product - quotient * divisor;
+  __uint128_t half = divisor / 2;
+ 
+  if (remainder > half) quotient++; /* ties round down to keep jitter bounded */
+ 
+  return (uint64_t)quotient;
 }
 
 uint32_t st10_tai_to_media_clk(uint64_t tai_ns, uint32_t sampling_rate) {

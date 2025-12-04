@@ -670,7 +670,7 @@ uint64_t st_app_user_time(void* ctx, struct st_user_time* user_time, uint64_t fr
   }
   __float128 ft_num = 1001 * 1e9;
   __float128 ft_den = 60000;
-  tai_time = roundl((fn + frame_num) * ft_num / ft_den);
+  tai_time = (uint64_t)((fn + frame_num) * ft_num / ft_den);
   //  tai_time += 1; // uncomment to fix the issue
 
   uint32_t rtp_fixed = (uint64_t)((fn + frame_num) * 1501.5);   // expected value

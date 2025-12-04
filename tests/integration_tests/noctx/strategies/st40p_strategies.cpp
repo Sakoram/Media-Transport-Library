@@ -110,14 +110,9 @@ void St40pUserTimestamp::verifyTimestampStep(uint64_t frame_idx,
 
   double current_target = plannedTimestampBaseNs(frame_idx);
   double previous_target = plannedTimestampBaseNs(frame_idx ? frame_idx - 1 : 0);
-  double expected_step_ns = current_target - previous_target;
-  if (expected_step_ns < 0.0) {
-    expected_step_ns = 0.0;
-  }
+  const uint64_t expected_step = st10_tai_to_media_clk(current_target, VIDEO_CLOCK_HZ) -
+                            st10_tai_to_media_clk(previous_target, VIDEO_CLOCK_HZ);
 
-  uint64_t expected_step_input = static_cast<uint64_t>(expected_step_ns);
-  const uint64_t expected_step =
-      st10_tai_to_media_clk(expected_step_input, VIDEO_CLOCK_HZ);
   const uint64_t diff = current_timestamp - lastTimestamp;
   EXPECT_EQ(diff, expected_step) << " idx_rx: " << frame_idx << " diff: " << diff;
 }
