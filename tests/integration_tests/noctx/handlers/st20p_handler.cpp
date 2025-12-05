@@ -101,11 +101,25 @@ void St20pHandler::fillSt20Ops(uint transmissionPort, uint framebufferQueueSize,
   sessionsOpsRx.interlaced = interlaced;
   sessionsOpsRx.framebuff_cnt = framebufferQueueSize;
 
-  nsFrameTime = st_frame_rate(fps);
-  if (nsFrameTime == 0)
+  normalizeSessionOps();
+}
+
+void St20pHandler::normalizeSessionOps() {
+  auto fpsToInteger = [](enum st_fps fps) {
+    return static_cast<uint64_t>(st_frame_rate(fps));
+  };
+
+  uint64_t frameRate = fpsToInteger(sessionsOpsTx.fps);
+  if (!frameRate) {
+    frameRate = fpsToInteger(sessionsOpsRx.fps);
+  }
+
+  if (!frameRate) {
     nsFrameTime = NS_PER_S / 25;
-  else
-    nsFrameTime = NS_PER_S / nsFrameTime;
+    return;
+  }
+
+  nsFrameTime = NS_PER_S / frameRate;
 }
 
 void St20pHandler::st20TxDefaultFunction(std::atomic<bool>& stopFlag) {

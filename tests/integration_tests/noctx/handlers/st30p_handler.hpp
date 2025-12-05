@@ -34,6 +34,8 @@ class St30pHandler
   void st30pTxDefaultFunction(std::atomic<bool>& stopFlag);
   void st30pRxDefaultFunction(std::atomic<bool>& stopFlag);
 
+  void normalizeSessionOps();
+
   uint64_t nsPacketTime;
 
  private:

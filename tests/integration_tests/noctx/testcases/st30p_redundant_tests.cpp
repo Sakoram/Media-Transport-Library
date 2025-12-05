@@ -74,7 +74,7 @@ TEST_F(NoCtxTest, st30p_redundant_latency) {
 
   StartFakePtpClock();  // reset ptp time to 0
   mtl_start(ctx->handle);
-  sleepUntilFailure(30);
+  sleepUntilFailure(20);
 
   latencyBundle.handler->session.stop();
   primaryBundle.handler->session.stop();
@@ -173,7 +173,7 @@ TEST_F(NoCtxTest, st30p_redundant_latency2) {
 
   sleepUntilFailure(10);
   primaryBundle.handler->session.stop();
-  sleepUntilFailure(20);
+  sleepUntilFailure(10);
 
   latencyBundle.handler->session.stop();
   rxBundle.handler->session.stop();

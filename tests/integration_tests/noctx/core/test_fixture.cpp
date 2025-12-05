@@ -139,6 +139,8 @@ NoCtxTest::St20pHandlerBundle NoCtxTest::createSt20pHandlerBundle(
     configure(handler);
   }
 
+  handler->normalizeSessionOps();
+
   std::unique_ptr<FrameTestStrategy> strategyOwned;
   FrameTestStrategy* strategy = nullptr;
   if (strategyFactory) {
@@ -185,6 +187,8 @@ NoCtxTest::St30pHandlerBundle NoCtxTest::createSt30pHandlerBundle(
   if (configure) {
     configure(handler);
   }
+
+  handler->normalizeSessionOps();
 
   std::unique_ptr<FrameTestStrategy> strategyOwned;
   FrameTestStrategy* strategy = nullptr;

@@ -30,6 +30,8 @@ class St20pHandler
                    enum st_fps fps = ST_FPS_P25, bool interlaced = false,
                    enum st20_packing packing = ST20_PACKING_BPM);
   
+  void normalizeSessionOps();
+
     void startSessionTx() override;
     void startSessionRx() override;
 
