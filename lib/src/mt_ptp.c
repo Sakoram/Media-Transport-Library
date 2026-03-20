@@ -1027,6 +1027,12 @@ static int ptp_parse_announce(struct mt_ptp_impl* ptp, struct mt_ptp_announce_ms
                               enum mt_ptp_l_mode mode, struct mt_ipv4_udp* ipv4_hdr) {
   enum mtl_port port = ptp->port;
 
+  /* reject our own announce messages */
+  if (ptp_port_id_equal(&msg->hdr.source_port_identity, &ptp->our_port_id)) {
+    dbg("%s(%d), skip announce from ourselves\n", __func__, port);
+    return -EINVAL;
+  }
+
   if (!ptp->master_initialized) {
     ptp->master_initialized = true;
     ptp->master_utc_offset = ntohs(msg->current_utc_offset);

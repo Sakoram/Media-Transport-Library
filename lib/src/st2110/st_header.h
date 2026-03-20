@@ -195,6 +195,14 @@ struct st_tx_video_pacing {
   /* ptp time may onward */
   uint32_t max_onward_epochs;
   uint64_t tsc_time_frame_start; /* start tsc time for frame start */
+  /* E830 NIC quantizes LaunchTime to 128ns (>>7). Use integer-only Bresenham
+   * arithmetic to avoid double-precision loss at PTP magnitude ~1.77e18.
+   * At that scale, `uint64_t += double` has ULP=256ns, destroying 128ns alignment. */
+  bool ptp_cursor_128ns_align;
+  uint32_t trs_128ns_ticks_base;  /* floor(trs / 128) ticks per packet */
+  uint32_t trs_128ns_ticks_extra; /* extra ticks to distribute (Bresenham numerator) */
+  uint32_t trs_128ns_total_pkts;  /* total pkts per frame (Bresenham denominator) */
+  uint32_t trs_128ns_accum;       /* Bresenham accumulator, reset per frame */
 };
 
 enum st20_packet_type {

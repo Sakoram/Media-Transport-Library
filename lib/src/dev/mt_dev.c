@@ -948,6 +948,12 @@ static int dev_config_port(struct mt_interface* inf) {
 #endif
   }
 
+#if RTE_VERSION >= RTE_VERSION_NUM(23, 3, 0, 0)
+  if (inf->feature & MT_IF_FEATURE_TX_OFFLOAD_SEND_ON_TIMESTAMP) {
+    port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_SEND_ON_TIMESTAMP;
+  }
+#endif
+
   dbg("%s(%d), rss mode %d\n", __func__, port, inf->rss_mode);
   if (mt_has_srss(impl, port)) {
     struct rte_eth_rss_conf* rss_conf;

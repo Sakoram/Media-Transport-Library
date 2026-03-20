@@ -89,7 +89,7 @@ if [ "$sourced" -eq 0 ]; then
 		sudo ninja install
 	)
 
-	cd "$script_folder" || exit 1
-	echo "Removing downloaded DPDK source directory '$dpdk_folder'."
-	rm -rf "$dpdk_folder"
+	# cd "$script_folder" || exit 1
+	# echo "Removing downloaded DPDK source directory '$dpdk_folder'."
+	# rm -rf "$dpdk_folder"
 fi

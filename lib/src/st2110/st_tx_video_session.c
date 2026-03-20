@@ -69,9 +69,26 @@ static inline void pacing_set_mbuf_time_stamp(struct rte_mbuf* mbuf,
 }
 
 static inline void pacing_forward_cursor(struct st_tx_video_pacing* pacing) {
-  /* pkt forward */
-  pacing->tsc_time_cursor += pacing->trs;
-  pacing->ptp_time_cursor += pacing->trs;
+  if (pacing->ptp_cursor_128ns_align) {
+    /* Integer-only Bresenham pacing in 128ns ticks.
+     * Avoids `uint64_t += double` which loses ~256ns at PTP magnitude 1.77e18,
+     * causing the effective step to be floor(trs/256)*256 = 7680ns instead of
+     * the target ~7776ns. Bresenham distributes the fractional tick evenly
+     * across all packets, giving exact total frame span. */
+    uint32_t step_ticks = pacing->trs_128ns_ticks_base;
+    pacing->trs_128ns_accum += pacing->trs_128ns_ticks_extra;
+    if (pacing->trs_128ns_accum >= pacing->trs_128ns_total_pkts) {
+      step_ticks++;
+      pacing->trs_128ns_accum -= pacing->trs_128ns_total_pkts;
+    }
+    uint64_t step_ns = (uint64_t)step_ticks << 7; /* * 128 */
+    pacing->ptp_time_cursor += step_ns;
+    pacing->tsc_time_cursor += step_ns;
+  } else {
+    /* Non-TSN: use original double arithmetic */
+    pacing->tsc_time_cursor += pacing->trs;
+    pacing->ptp_time_cursor += pacing->trs;
+  }
 }
 
 static inline uint64_t tv_rl_bps(struct st_tx_video_session_impl* s) {
@@ -522,6 +539,39 @@ static int tv_init_pacing(struct mtl_main_impl* impl,
   /* default VRX compensate as rl accuracy, update later in tv_train_pacing */
   pacing->pad_interval = s->st20_total_pkts;
 
+  /* E830 NIC LaunchTime quantizes timestamps to 128ns. Enable ptp_time_cursor
+   * alignment for TSN pacing to prevent cumulative truncation error. */
+  pacing->ptp_cursor_128ns_align =
+      (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN);
+  if (pacing->ptp_cursor_128ns_align) {
+    /* Pre-compute Bresenham parameters for integer-only 128ns-tick pacing.
+     * This avoids double-precision loss in pacing_forward_cursor(). */
+    pacing->trs_128ns_ticks_base = (uint32_t)(pacing->trs / 128.0);
+    uint64_t total_ticks =
+        (uint64_t)(pacing->trs * s->st20_total_pkts / 128.0 + 0.5); /* round */
+    pacing->trs_128ns_total_pkts = s->st20_total_pkts;
+    pacing->trs_128ns_ticks_extra =
+        (uint32_t)(total_ticks -
+                   (uint64_t)pacing->trs_128ns_ticks_base * s->st20_total_pkts);
+    pacing->trs_128ns_accum = 0;
+    info("%s[%02d], TSN Bresenham pacing: base=%u ticks (%u ns), extra=%u/%u, "
+        "total_ticks=%" PRIu64 ", frame_span=%.3f ms\n",
+        __func__, idx, pacing->trs_128ns_ticks_base,
+        pacing->trs_128ns_ticks_base * 128, pacing->trs_128ns_ticks_extra,
+        pacing->trs_128ns_total_pkts, total_ticks,
+        (double)(total_ticks * 128) / 1e6);
+  }
+
+  info("%s[%02d], pacing params: trs=%.4f frame_time=%.2f tr_offset=%.2f\n"
+      "  reactive=%.6f vrx=%u total_pkts=%d frame_idle=%.2f\n"
+      "  trs_floor128=%u trs_ceil128=%u NIC_frame_span=%.3fms ideal_frame_span=%.3fms\n",
+      __func__, idx, pacing->trs, pacing->frame_time, pacing->tr_offset,
+      pacing->reactive, pacing->vrx, s->st20_total_pkts, pacing->frame_idle_time,
+      (uint32_t)(((uint64_t)pacing->trs >> 7) << 7),
+      (uint32_t)((((uint64_t)(pacing->trs + 127)) >> 7) << 7),
+      (double)(((uint64_t)pacing->trs >> 7) << 7) * s->st20_total_pkts / 1e6,
+      pacing->trs * s->st20_total_pkts / 1e6);
+
   int num_port = s->ops.num_port;
   int ret;
 
@@ -658,9 +708,10 @@ static inline uint64_t calc_frame_count_since_epoch(struct st_tx_video_session_i
     }
 
   } else {
-    dbg("%s(%d), frame is late, frame_count_tai %" PRIu64 " next_free_frame_slot %" PRIu64
-        "\n",
-        __func__, s->idx, frame_count_tai, next_free_frame_slot);
+    info("%s(%d), EPOCH DROP: frame_count_tai %" PRIu64 " > next_free %" PRIu64
+        " (drop %" PRIu64 "), cur_tai %" PRIu64 " frame_time %.2f\n",
+        __func__, s->idx, frame_count_tai, next_free_frame_slot,
+        frame_count_tai - next_free_frame_slot, cur_tai, s->pacing.frame_time);
     ST_SESSION_STAT_ADD(s, port_user_stats.common, stat_epoch_drop,
                         (frame_count_tai - next_free_frame_slot));
 
@@ -699,12 +750,35 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
     time_to_tx_ns = 0;
   }
 
+  /* For LaunchTime pacing, the NIC needs LaunchTime values in the future.
+   * If the current epoch's start time has already passed (time_to_tx <= 0),
+   * advance to the next epoch so the schedule is ~1 frame ahead. Once
+   * bootstrapped, the per-bulk TSC gate in the transmitter maintains the
+   * lead automatically. */
+  if (pacing->ptp_cursor_128ns_align && time_to_tx_ns <= 0) {
+    pacing->cur_epochs++;
+    start_time_tai += (uint64_t)pacing->frame_time;
+    time_to_tx_ns = start_time_tai - cur_tai;
+    if (time_to_tx_ns < 0) time_to_tx_ns = 0;
+  }
+
   /* tsc_time_cursor is important as it determines when first packet of the frame will be
    * send */
   pacing->tsc_time_cursor = cur_tsc + time_to_tx_ns;
 
   pacing->tsc_time_frame_start = pacing->tsc_time_cursor;
   pacing->ptp_time_cursor = start_time_tai;
+  if (pacing->ptp_cursor_128ns_align) {
+    /* Align initial ptp cursor to 128ns boundary for deterministic NIC scheduling */
+    pacing->ptp_time_cursor = ((pacing->ptp_time_cursor + 127) >> 7) << 7;
+    /* Reset Bresenham accumulator for the new frame */
+    pacing->trs_128ns_accum = 0;
+  }
+
+  info("%s(%d), epoch %" PRIu64 " start_tai %" PRIu64 " ptp_cursor %" PRIu64
+      " tsc_cursor %" PRIu64 " time_to_tx %" PRId64 " trs %.4f\n",
+      __func__, s->idx, pacing->cur_epochs, start_time_tai,
+      pacing->ptp_time_cursor, pacing->tsc_time_cursor, time_to_tx_ns, pacing->trs);
 
   return 0;
 }
@@ -1910,6 +1984,13 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       frame->tv_meta.timestamp = pacing->ptp_time_cursor;
       frame->tv_meta.rtp_timestamp = pacing->rtp_time_stamp;
       frame->tv_meta.epoch = pacing->cur_epochs;
+      info("%s(%d), frame %d start: ptp_cursor %" PRIu64 " (sub-sec %" PRIu64
+          " >>7 %" PRIu64 ") rtp_ts %u epoch %" PRIu64 "\n",
+          __func__, idx, next_frame_idx,
+          (uint64_t)pacing->ptp_time_cursor,
+          (uint64_t)(pacing->ptp_time_cursor % 1000000000ULL),
+          (uint64_t)((pacing->ptp_time_cursor % 1000000000ULL) >> 7),
+          pacing->rtp_time_stamp, (uint64_t)pacing->cur_epochs);
       /* init to next field */
       MT_USDT_ST20_TX_FRAME_NEXT(s->mgr->idx, s->idx, next_frame_idx, frame->addr,
                                  pacing->rtp_time_stamp);
@@ -2046,8 +2127,15 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
   }
 
   if (s->st20_pkt_idx >= s->st20_total_pkts) {
-    dbg("%s(%d), frame %d done with %d pkts\n", __func__, idx, s->st20_frame_idx,
-        s->st20_pkt_idx);
+    { uint64_t frame_span_ns =
+          pacing->ptp_time_cursor - s->st20_frames[s->st20_frame_idx].tv_meta.timestamp;
+    info("%s(%d), frame %d done: ptp_cursor_end %" PRIu64 " (sub-sec %" PRIu64
+        " >>7 %" PRIu64 ") frame_span %" PRIu64 " ns (%.3f ms)\n",
+        __func__, idx, s->st20_frame_idx,
+        (uint64_t)pacing->ptp_time_cursor,
+        (uint64_t)(pacing->ptp_time_cursor % 1000000000ULL),
+        (uint64_t)((pacing->ptp_time_cursor % 1000000000ULL) >> 7),
+        frame_span_ns, (double)frame_span_ns / 1e6); }
     /* end of current frame */
     s->st20_frame_stat = ST21_TX_STAT_WAIT_FRAME;
     s->st20_pkt_idx = 0;
@@ -2060,12 +2148,19 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       tv_frame_free_cb(frame_info->addr, frame_info);
     }
 
-    uint64_t frame_end_time = mt_get_tsc(impl);
-    if (frame_end_time > pacing->tsc_time_cursor) {
-      ST_SESSION_STAT_INC(s, port_user_stats.common, stat_exceed_frame_time);
-      rte_atomic32_inc(&s->cbs_build_timeout);
-      dbg("%s(%d), frame %d build time out %ldus\n", __func__, idx, s->st20_frame_idx,
-          (frame_end_time - pacing->tsc_time_cursor) / NS_PER_US);
+    /* Skip build timeout check for TSN: the NIC controls timing via LaunchTime
+     * descriptors. The builder is rate-limited by NIC TX ring backpressure (the
+     * NIC holds packets until their scheduled time), so the builder naturally
+     * takes ~frame_active_time to finish, leaving almost no margin. This is
+     * expected behavior, not an actual timeout. */
+    if (s->pacing_way[MTL_SESSION_PORT_P] != ST21_TX_PACING_WAY_TSN) {
+      uint64_t frame_end_time = mt_get_tsc(impl);
+      if (frame_end_time > pacing->tsc_time_cursor) {
+        ST_SESSION_STAT_INC(s, port_user_stats.common, stat_exceed_frame_time);
+        rte_atomic32_inc(&s->cbs_build_timeout);
+        dbg("%s(%d), frame %d build time out %ldus\n", __func__, idx, s->st20_frame_idx,
+            (frame_end_time - pacing->tsc_time_cursor) / NS_PER_US);
+      }
     }
   }
 
@@ -2569,12 +2664,14 @@ static int tv_tasklet_st22(struct mtl_main_impl* impl,
       tv_frame_free_cb(frame_info->addr, frame_info);
     }
 
-    uint64_t frame_end_time = mt_get_tsc(impl);
-    if (frame_end_time > pacing->tsc_time_cursor) {
-      ST_SESSION_STAT_INC(s, port_user_stats.common, stat_exceed_frame_time);
-      rte_atomic32_inc(&s->cbs_build_timeout);
-      dbg("%s(%d), frame %d build time out %ldus\n", __func__, idx, s->st20_frame_idx,
-          (frame_end_time - pacing->tsc_time_cursor) / NS_PER_US);
+    if (s->pacing_way[MTL_SESSION_PORT_P] != ST21_TX_PACING_WAY_TSN) {
+      uint64_t frame_end_time = mt_get_tsc(impl);
+      if (frame_end_time > pacing->tsc_time_cursor) {
+        ST_SESSION_STAT_INC(s, port_user_stats.common, stat_exceed_frame_time);
+        rte_atomic32_inc(&s->cbs_build_timeout);
+        dbg("%s(%d), frame %d build time out %ldus\n", __func__, idx, s->st20_frame_idx,
+            (frame_end_time - pacing->tsc_time_cursor) / NS_PER_US);
+      }
     }
   }
 
@@ -3262,9 +3359,26 @@ static int tv_attach(struct mtl_main_impl* impl, struct st_tx_video_sessions_mgr
   s->tx_mono_pool = mt_user_tx_mono_pool(impl);
   s->multi_src_port = mt_user_multi_src_port(impl);
   s->ring_count = ST_TX_VIDEO_SESSIONS_RING_SIZE;
-  /* make sure the ring is smaller than total pkts */
-  while (s->ring_count > s->st20_total_pkts) {
-    s->ring_count /= 2;
+  /* For TSN LaunchTime pacing, the builder must run AHEAD of the transmitter so that
+   * LaunchTime timestamps are in the future when the NIC processes them. If the ring
+   * is smaller than a frame, NIC backpressure forces the builder to run at wire rate
+   * with zero headroom, making time_to_tx = 0 (all LaunchTimes in the past → NIC sends
+   * immediately → wrong epoch alignment / latency). With ring >= 2 * total_pkts, the
+   * builder can queue 1+ frames ahead while the transmitter drains at NIC rate. */
+  if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) {
+    uint32_t min_ring = (uint32_t)s->st20_total_pkts * 2;
+    /* rte_ring_create requires power-of-2 count */
+    uint32_t ring_po2 = 1;
+    while (ring_po2 < min_ring) ring_po2 <<= 1;
+    s->ring_count = ring_po2;
+    info("%s(%d), TSN ring %u (2 * %d pkts, rounded to po2)\n", __func__, idx,
+        s->ring_count, s->st20_total_pkts);
+  }
+  /* For non-TSN, make sure the ring is smaller than total pkts */
+  if (s->pacing_way[MTL_SESSION_PORT_P] != ST21_TX_PACING_WAY_TSN) {
+    while (s->ring_count > s->st20_total_pkts) {
+      s->ring_count /= 2;
+    }
   }
 
   if (st22_frame_ops) {

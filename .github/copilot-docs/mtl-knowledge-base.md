@@ -2,7 +2,7 @@
 
 > **Purpose**: Single consolidated reference for AI agents working on MTL.
 > This file replaces all prior per-topic copilot-docs files.
-> Last verified against codebase: 2025-01.
+> Last verified against codebase: 2026-03.
 
 ---
 
@@ -172,7 +172,7 @@ Two tasklets per video session connected by `rte_ring` (`packet_ring`):
 
 Ring = shock absorber. Builder can be slow; transmitter still has queued packets.
 
-**Ring sizing**: Default 512 entries (`ST_TX_VIDEO_SESSIONS_RING_SIZE`, ≈ 1/9 of a 1080p frame's ~4500 packets). Halved if exceeds `st20_total_pkts`. Uses SP/SC (single-producer/single-consumer) mode — both tasklets run on the same lcore, so no atomics needed (~2-3ns vs ~20+ns for multi-producer).
+**Ring sizing**: Default 512 entries (`ST_TX_VIDEO_SESSIONS_RING_SIZE`, ≈ 1/9 of a 1080p frame's ~4500 packets). Enlarged to 2048 for TSN pacing (NIC holds packets → backpressure fills ring). Halved if exceeds `st20_total_pkts`. Uses SP/SC (single-producer/single-consumer) mode — both tasklets run on the same lcore, so no atomics needed (~2-3ns vs ~20+ns for multi-producer).
 
 **Bulk enqueue semantics**: `rte_ring_sp_enqueue_bulk` (all-or-nothing) not `_burst` (best-effort). The 4 packets have sequential RTP sequence numbers and pacing timestamps — they must be sent as a unit. Partial enqueue would break batch integrity.
 
@@ -379,10 +379,50 @@ Hardware RL has ramp-up delay. MTL sends padding packets (RTP padding bit set) b
 - Every RTP packet carries PTP-derived timestamp
 - Without PTP: local TSC-based pacing works but clocks drift
 
+### TSN / LaunchTime Pacing (E830)
+- E830 supports per-packet TX scheduling via LaunchTime descriptors
+- Requires `RTE_ETH_TX_OFFLOAD_SEND_ON_TIMESTAMP` in port txmode offloads (`mt_dev.c`)
+- ICE driver stores `(txtime_ns % 1e9) >> 7` = 128ns-resolution sub-second timestamp
+- Descriptor format: 32-bit, bits 0-12 = TX desc index, bits 13-31 = 19-bit tstamp
+- 19-bit tstamp wraps every 2^19 × 128ns = 67.1ms (fine for frames < 33ms)
+- `ts_round_type` field (2-bit) exists in txtime queue context but is left at 0 (truncate/floor) — never explicitly set by driver
+- `ptp_time_cursor` (uint64_t, st_header.h) stored in mbuf private area → transmitter copies to dynfield → ICE driver writes to HW tsq ring
+- **Critical**: NIC truncates `>> 7` (floor to 128ns). For trs=7776ns (1080p30): 7776%128=96ns residual. Without alignment, the 96ns lost per packet compresses frame span by ~400µs (31.6ms vs 32.0ms), causing Cinst/VRX violations.
+- **Alignment fix**: `pacing->ptp_cursor_128ns_align = true` rounds ptp_time_cursor UP to 128ns after each trs step in `pacing_forward_cursor()`
+- Flag set in `tv_init_pacing()` when `pacing_way == ST21_TX_PACING_WAY_TSN`
+- Also applied at frame start in `tv_sync_pacing()` for the initial cursor
+
+### TSN vs RL/TSC Transmitter Differences
+- **TSN transmitter** (`video_trs_launch_time_tasklet`): no timing gate — pushes all packets to NIC immediately with LaunchTime timestamps. NIC holds packets until scheduled time.
+- **RL/TSC transmitter**: software-gated — waits for `cur_tsc >= target_tsc` before bursting
+- TSN **build timeout is skipped**: NIC backpressure naturally rate-limits the builder to ~frame_active_time
+- TSN **ring size enlarged** to 2048 (vs default 512): compensates for NIC holding packets in TX ring
+- TSN **inflight counts appear high** (normal): ~total_pkts × bulk in NIC TX ring at any time
+
+### ⚠️ Double Precision Gotcha: `uint64_t += double`
+- `pacing_forward_cursor()` does `ptp_time_cursor += trs` where cursor is `uint64_t` and trs is `double`
+- C promotes the `uint64_t` to `double` for the addition. At PTP magnitude ~1.77×10¹⁸ (2026), double ULP = 256ns
+- Each step loses ~96ns on average. Over 4115 packets: **~395µs cumulative error per frame**
+- This produces the SAME 31.6ms compressed frame span as the NIC's >>7 truncation — the 128ns alignment cannot help because the input values are already corrupted by double conversion
+- **Fix required**: integer-only cursor arithmetic (Bresenham-style fractional accumulator or pre-quantized integer trs)
+- Same concern applies to `tai_from_frame_count()` (`frame_count × frame_time` as double at 10¹⁸ scale) — mitigated by `nextafter(..., INFINITY)` but not perfect
+
 ### Epoch Timing
-Frame transmission aligned to PTP epoch boundaries. For 59.94fps: frame period ≈ 16.683ms.
-- Late frame → advance to next epoch → `stat_frame_late` increments
-- Fix is in the application, not MTL
+Frame transmission aligned to PTP epoch boundaries. Epoch = frame count since TAI time zero (`cur_epochs = ptp_time / frame_time`).
+
+**Epoch drop condition** (in `calc_frame_count_since_epoch`):
+- `frame_count_tai = cur_ptp / frame_time` (where are we now)
+- `next_free_slot = cur_epochs + 1` (next slot we can use)
+- If `frame_count_tai > next_free_slot` → **epoch drop** (skipped frames), snap forward
+- Causes: app slow to provide frames, builder CPU-bound, ring full (transmitter backpressure), scheduler latency
+- `stat_epoch_drop` counts total skipped slots (not events)
+- Opposite: `stat_epoch_onward` if building ahead of real time (> `max_onward_epochs` = 1 second's worth)
+
+**Transmission start time per frame**:
+```
+start_time = tai_from_frame_count(epoch) + tr_offset - vrx × trs
+```
+where `tai_from_frame_count` uses `nextafter(epoch × frame_time, INFINITY)` to handle double precision at large epoch counts.
 
 ### VRX (Virtual Receiver Buffer) Conformance
 RX diagnostic stats:
