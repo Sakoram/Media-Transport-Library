@@ -172,7 +172,7 @@ Two tasklets per video session connected by `rte_ring` (`packet_ring`):
 
 Ring = shock absorber. Builder can be slow; transmitter still has queued packets.
 
-**Ring sizing**: Default 512 entries (`ST_TX_VIDEO_SESSIONS_RING_SIZE`, ≈ 1/8 of a 1080p frame's 4115 packets). Halved if exceeds `st20_total_pkts`. Uses SP/SC (single-producer/single-consumer) mode — both tasklets run on the same lcore, so no atomics needed (~2-3ns vs ~20+ns for multi-producer).
+**Ring sizing**: Default 512 entries (`ST_TX_VIDEO_SESSIONS_RING_SIZE`, ≈ 1/9 of a 1080p frame's ~4500 packets). Enlarged to 2048 for TSN pacing (NIC holds packets → backpressure fills ring). Halved if exceeds `st20_total_pkts`. Uses SP/SC (single-producer/single-consumer) mode — both tasklets run on the same lcore, so no atomics needed (~2-3ns vs ~20+ns for multi-producer).
 
 **Bulk enqueue semantics**: `rte_ring_sp_enqueue_bulk` (all-or-nothing) not `_burst` (best-effort). The 4 packets have sequential RTP sequence numbers and pacing timestamps — they must be sent as a unit. Partial enqueue would break batch integrity.
 
@@ -362,11 +362,6 @@ pacing->vrx -= (s->bulk - 1); /* compensate for bulk */
 
 **TSC Narrow mode**: Forces `s->bulk = 1` for maximum accuracy.
 
-**TSN (LaunchTime) mode**: Uses **default bulk=4**. With bulk=1 the per-packet scheduler overhead (~1.5µs) makes frame drain time exceed frame_time, causing the epoch-advance safety net to fire every frame → 2× frame rate. Bulk=4 quarters the overhead so drain < frame_time. Cinst peak = 3 (within narrow cmax=4). VRX compensation applied.
-
-**GOTCHA: bulk=1 + ring=512 TSN epoch doubling**  
-With bulk=1, each packet requires 3-5 scheduler dispatches (TSC gate poll → inflight burst → dequeue → build). Overhead adds ~1.5µs/pkt → effective_trs ≈ 9.3µs → drain_time for (4115-512) pkts ≈ 33.5ms > frame_time (33.33ms). Result: `time_to_tx_ns` goes negative every frame, advance fires every frame, `cur_epochs` increments +2 per frame (calc +1, advance +1). System locks at 2× frame_time (15fps instead of 30fps). Fix: bulk=4 (overhead/pkt drops to ~0.4µs → drain ≈ 30ms).
-
 | Constraint | Impact |
 |-----------|--------|
 | `ST_SESSION_MAX_BULK = 4` | Array sizing, compile-time |
@@ -398,24 +393,11 @@ Hardware RL has ramp-up delay. MTL sends padding packets (RTP padding bit set) b
 - Also applied at frame start in `tv_sync_pacing()` for the initial cursor
 
 ### TSN vs RL/TSC Transmitter Differences
-- **TSN transmitter** (`video_trs_launch_time_tasklet`): per-bulk TSC gate + LaunchTime on each packet. Gates every dequeued packet against TSC clock, sets LaunchTime on each.
+- **TSN transmitter** (`video_trs_launch_time_tasklet`): no timing gate — pushes all packets to NIC immediately with LaunchTime timestamps. NIC holds packets until scheduled time.
 - **RL/TSC transmitter**: software-gated — waits for `cur_tsc >= target_tsc` before bursting
-- TSN uses **bulk=4** (default): amortizes scheduler overhead. With bulk=1 the ~1.5µs/pkt overhead makes drain_time > frame_time → epoch doubling (see §5 bulk=1 gotcha)
 - TSN **build timeout is skipped**: NIC backpressure naturally rate-limits the builder to ~frame_active_time
-
-### ⚠️ E830 LaunchTime Does NOT Hold Packets (Critical Finding)
-- **Tested**: TSC headroom of 16 trs (~124µs) sent packets to NIC 124µs before their LaunchTime
-- **Result**: NIC sent packets immediately at TSC gate time, NOT at LaunchTime time. All packets arrived 118µs early.
-- **Conclusion**: On this E830, the NIC's TSQ (TX Scheduling Queue) does NOT hold descriptors until their scheduled timestamp. The software TSC gate is the SOLE pacing mechanism.
-- **Possible cause**: TSQ `timer_num` field in `ice_txtime_ctx` defaults to 0 (never set). If PF's `tmr_index_assoc=1`, the TSQ compares against a different clock than what MTL uses for PTP time.
-- **Implication**: Cannot rely on NIC to absorb scheduler jitter. Must handle in software.
-
-### ⚠️ info() on Hot Path Kills Cinst (Critical Finding)
-- `info()` → `vfprintf(stderr)` is synchronous/blocking, ~20-50µs per call
-- When called per-frame on the TX lcore (tv_sync_pacing, frame start/done), it blocks the scheduler
-- During the stall, the transmitter can't run TSC gates → ~6 overdue packets burst → Cinst=7
-- **Fix**: All per-frame logging on TX lcore must use `dbg()` (compiled out in release) or be removed
-- **Invariant**: Never `info()` on data-plane hot path — only `dbg()`, `dbg_once()`, or stat counters
+- TSN **ring size enlarged** to 2048 (vs default 512): compensates for NIC holding packets in TX ring
+- TSN **inflight counts appear high** (normal): ~total_pkts × bulk in NIC TX ring at any time
 
 ### ⚠️ Double Precision Gotcha: `uint64_t += double`
 - `pacing_forward_cursor()` does `ptp_time_cursor += trs` where cursor is `uint64_t` and trs is `double`
@@ -432,41 +414,15 @@ Frame transmission aligned to PTP epoch boundaries. Epoch = frame count since TA
 - `frame_count_tai = cur_ptp / frame_time` (where are we now)
 - `next_free_slot = cur_epochs + 1` (next slot we can use)
 - If `frame_count_tai > next_free_slot` → **epoch drop** (skipped frames), snap forward
-
-### ⚠️ Epoch Advance Bug (Critical Finding — RESOLVED)
-- **Problem**: All epoch-advance mechanisms in `tv_sync_pacing()` caused fps-killing cascade failures
-- **Root cause discovered via debug logging (wtorek4)**:
-  1. Advance pushed time_to_tx to +26ms, but builder fills 512-entry ring then sits BLOCKED for 26ms until transmitter starts
-  2. Total builder cycle = 26ms wait + 28ms build = 54-67ms (2× frame_time)
-  3. Next frame is even more behind → advance fires again → cascade
-  4. During cascade: every other frame slot wasted → 15fps. After cascade: system recovers to 30fps at +5.3ms time_to_tx
-  5. Blend of cascade + healthy periods = 24-25fps
-- **Natural equilibrium**: `time_to_tx_eq = frame_time - (pkts - ring_size) × trs ≈ 5.33ms`
-- **Recovery**: From time_to_tx=0, system auto-converges to equilibrium in ~3 frames via ring-buffer dynamics
-- **All threshold variants tried and FAILED**: `<=0`, `<-(frame_time/2)`, `<=0` while-loop, `<-tr_offset` while-loop — all cascaded
-- **Key invariant**: NEVER use info() on the TX lcore hot path — 50µs vfprintf blocks cause Cinst bursts and amplify timing deficits via feedback loops
-
-### Bootstrap Epoch Offset (wtorek5 Finding — FIXED)
-- **Problem**: Without any advance, first frame at startup gets epoch E (current via EPOCH DROP from 0). We're at position P within epoch E (random, 0→33ms). `time_to_tx = tr_offset - P` is negative, clamped to 0. RTP timestamp encodes epoch E, but packet goes out P ms after epoch start. Actual TRO = P (10-17ms) instead of tr_offset (1.274ms). This creates permanent VRX offset of `(P - tr_offset)/trs ≈ -1200 packets`.
-- **Measured**: VRX = -2050 to -1197 (two bands), pkt_ts_vs_rtp = 9.35-15.99ms, TRO actual avg 11.7ms
-- **Fix**: One-shot `tsn_initial_epoch_done` flag in pacing struct. On first `tv_sync_pacing()` call with TSN, if time_to_tx < 0, advance `cur_epochs++` and recompute. Set flag to true. Never fires again.
-- After bootstrap advance: time_to_tx = frame_time + tr_offset - P (always positive, 1.27–34.6ms). RTP timestamp encodes E+1. Actual TRO ≈ tr_offset. ✅
-- In steady state: time_to_tx ≈ +5.3ms, flag already set, no advance ever fires. EPOCH DROP handles stalls naturally.
+- Causes: app slow to provide frames, builder CPU-bound, ring full (transmitter backpressure), scheduler latency
+- `stat_epoch_drop` counts total skipped slots (not events)
+- Opposite: `stat_epoch_onward` if building ahead of real time (> `max_onward_epochs` = 1 second's worth)
 
 **Transmission start time per frame**:
 ```
 start_time = tai_from_frame_count(epoch) + tr_offset - vrx × trs
 ```
 where `tai_from_frame_count` uses `nextafter(epoch × frame_time, INFINITY)` to handle double precision at large epoch counts.
-
-### RTP Timestamp for TSN — ptp_cursor is CORRECT (Critical Finding)
-- **Attempted fix (Fix 12, REVERTED)**: Changed TSN to use epoch-based RTP (`tai_from_frame_count(cur_epochs)`) instead of `ptp_time_cursor`. WRONG.
-- **Root cause of error**: EBU LIST computes TRO from the first-packet arrival pattern relative to frame period, NOT from the RTP timestamp directly. Both RTP sources gave identical TRO = 1.239ms.
-- **What Fix 12 actually broke**: `pkt_ts_vs_rtp = capture_time - rtp_time`:
-  - With `ptp_time_cursor` RTP: `pkt_ts_vs_rtp ≈ cable_delay (5µs)` ✅ (verified in wtorek2)
-  - With epoch-based RTP: `pkt_ts_vs_rtp ≈ tr_eff = 1235µs` ❌ (exceeds 1ms limit, verified in wtorek7)
-- **Invariant**: For TSN, always use default `ptp_time_cursor` for RTP timestamps. The `ST20_TX_FLAG_RTP_TIMESTAMP_EPOCH` flag is app-opt-in only—do NOT force it for TSN.
-- **Note**: `ptp_time_cursor = epoch × frame_time + tr_offset`. This is correct because the first packet IS sent at `epoch + tr_offset`. The RTP timestamp should reflect actual send time for pkt_ts_vs_rtp to equal cable_delay.
 
 ### VRX (Virtual Receiver Buffer) Conformance
 RX diagnostic stats:

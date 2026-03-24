@@ -199,7 +199,6 @@ struct st_tx_video_pacing {
    * arithmetic to avoid double-precision loss at PTP magnitude ~1.77e18.
    * At that scale, `uint64_t += double` has ULP=256ns, destroying 128ns alignment. */
   bool ptp_cursor_128ns_align;
-  bool tsn_initial_epoch_done; /* one-shot: first tv_sync_pacing advances epoch if needed */
   uint32_t trs_128ns_ticks_base;  /* floor(trs / 128) ticks per packet */
   uint32_t trs_128ns_ticks_extra; /* extra ticks to distribute (Bresenham numerator) */
   uint32_t trs_128ns_total_pkts;  /* total pkts per frame (Bresenham denominator) */
@@ -419,7 +418,6 @@ struct st_tx_video_session_impl {
   uint32_t stat_max_notify_frame_us;
   uint32_t stat_unrecoverable_error;
   uint32_t stat_recoverable_error;
-
   /* interlace */
   uint32_t stat_interlace_first_field;
   uint32_t stat_interlace_second_field;

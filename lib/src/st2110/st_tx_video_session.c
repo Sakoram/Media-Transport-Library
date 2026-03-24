@@ -615,15 +615,8 @@ static int tv_init_pacing(struct mtl_main_impl* impl,
       pacing->vrx = s->st21_vrx_narrow;
     }
   } else if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSC_NARROW) {
-    /* tsc narrow uses single bulk for better accuracy. */
+    /* tsc narrow use single bulk for better accuracy */
     s->bulk = 1;
-  } else if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) {
-    /* TSN (LaunchTime) uses default bulk (4).  With bulk=1 the per-packet
-     * scheduler overhead (~1.5µs) makes frame drain time exceed frame_time,
-     * causing the epoch-advance to fire every frame → 2× frame rate.
-     * bulk=4 quarters the overhead so drain < frame_time.  Cinst peak = 3
-     * (4 pkts burst, 1 ideal) which is within cmax_narrow = 4. */
-    pacing->vrx -= (s->bulk - 1); /* compensate for bulk */
   } else {
     pacing->vrx -= (s->bulk - 1); /* compensate for bulk */
   }
@@ -715,11 +708,7 @@ static inline uint64_t calc_frame_count_since_epoch(struct st_tx_video_session_i
     }
 
   } else {
-    /* Use dbg(), not info(): this runs on the TX lcore hot path.
-     * vfprintf in info() blocks ~50us, making the builder late for the next
-     * frame, which triggers another epoch drop (chain reaction).
-     * Epoch drops are counted in stat_epoch_drop and reported in stats. */
-    dbg("%s(%d), EPOCH DROP: frame_count_tai %" PRIu64 " > next_free %" PRIu64
+    notice("%s(%d), EPOCH DROP: frame_count_tai %" PRIu64 " > next_free %" PRIu64
         " (drop %" PRIu64 "), cur_tai %" PRIu64 " frame_time %.2f\n",
         __func__, s->idx, frame_count_tai, next_free_frame_slot,
         frame_count_tai - next_free_frame_slot, cur_tai, s->pacing.frame_time);
@@ -753,41 +742,25 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
   }
   time_to_tx_ns = start_time_tai - cur_tai;
 
-  /* TSN LaunchTime bootstrap: on the very first frame, calc_frame_count_since_epoch
-   * returns the current epoch E via EPOCH DROP (snapping from epoch 0). But we're
-   * at position P within epoch E, typically past tr_offset, so time_to_tx = tr_offset - P
-   * is negative. If we just clamp to 0, the RTP timestamp encodes epoch E whose start
-   * is P ms in the past → actual TRO = P instead of tr_offset → permanent VRX offset
-   * of (P - tr_offset)/trs packets (measured: VRX = -1197 to -2050).
-   *
-   * Fix: advance by 1 epoch on the first call only. This gives:
-   *   time_to_tx = frame_time + tr_offset - P  (always positive, 1.27..34.6ms)
-   * The RTP timestamp then encodes epoch E+1, and the actual TRO ≈ tr_offset.
-   *
-   * This MUST NOT fire in steady state — the advance cascade (push time_to_tx
-   * to +26ms → builder blocked on ring for 26ms → 54ms cycle → advance again)
-   * destroyed throughput (24fps). In steady state time_to_tx ≈ +5.3ms, so
-   * the clamp-to-0 path never fires anyway.
-   *
-   * Steady-state stalls (>frame_time) are handled by EPOCH DROP in
-   * calc_frame_count_since_epoch, which snaps forward naturally. Small stalls
-   * (time_to_tx slightly negative) are clamped to 0 — TSC gate ensures correct
-   * wire spacing, and the system self-recovers in ~3 frames. */
-  if (pacing->ptp_cursor_128ns_align && !pacing->tsn_initial_epoch_done) {
-    pacing->tsn_initial_epoch_done = true;
-    if (time_to_tx_ns < 0) {
-      pacing->cur_epochs++;
-      start_time_tai = transmission_start_time(pacing, pacing->cur_epochs);
-      time_to_tx_ns = start_time_tai - cur_tai;
-      dbg("%s(%d), TSN bootstrap: advanced epoch to %" PRIu64 ", time_to_tx %" PRId64
-          " ns\n",
-          __func__, s->idx, pacing->cur_epochs, time_to_tx_ns);
-    }
+  /* For LaunchTime pacing, the NIC needs LaunchTime values in the future.
+   * If the current epoch's start time has already passed (time_to_tx <= 0),
+   * advance to the next epoch so the schedule is ~1 frame ahead.
+   * This check must happen BEFORE the negative clamp below, otherwise the
+   * clamp sets time_to_tx=0 and this condition triggers every frame, causing
+   * the system to skip every other epoch (fps=24 instead of 30).
+   * In steady state, the builder runs ~1 frame ahead so time_to_tx > 0 and
+   * this branch does not fire. */
+  if (pacing->ptp_cursor_128ns_align && time_to_tx_ns <= 0) {
+    pacing->cur_epochs++;
+    start_time_tai = transmission_start_time(pacing, pacing->cur_epochs);
+    time_to_tx_ns = start_time_tai - cur_tai;
   }
 
   if (time_to_tx_ns < 0) {
-    dbg("%s(%d), clamped time_to_tx: %" PRId64 " ns, epoch %" PRIu64 "\n",
-        __func__, s->idx, time_to_tx_ns, pacing->cur_epochs);
+    /* should never happen, but it does. TODO: check why */
+    dbg("%s(%d), negative time_to_tx_ns detected: %ld ns. Current PTP time: %" PRIu64
+        "\n",
+        __func__, s->idx, time_to_tx_ns, cur_tai);
     time_to_tx_ns = 0;
   }
 
@@ -795,6 +768,7 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
    * send */
   pacing->tsc_time_cursor = cur_tsc + time_to_tx_ns;
 
+  pacing->tsc_time_frame_start = pacing->tsc_time_cursor;
   pacing->ptp_time_cursor = start_time_tai;
   if (pacing->ptp_cursor_128ns_align) {
     /* Align initial ptp cursor to 128ns boundary for deterministic NIC scheduling */
@@ -802,16 +776,11 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
     /* Reset Bresenham accumulator for the new frame */
     pacing->trs_128ns_accum = 0;
   }
-  pacing->tsc_time_frame_start = pacing->tsc_time_cursor;
 
-  /* Use dbg(), not info(): this runs every frame on the TX lcore.
-   * Synchronous vfprintf in info() blocks the scheduler for ~50us,
-   * causing the transmitter to miss ~6 TSC gates, creating Cinst burst. */
   dbg("%s(%d), epoch %" PRIu64 " start_tai %" PRIu64 " ptp_cursor %" PRIu64
       " tsc_cursor %" PRIu64 " time_to_tx %" PRId64 " trs %.4f\n",
       __func__, s->idx, pacing->cur_epochs, start_time_tai,
-      pacing->ptp_time_cursor, pacing->tsc_time_cursor, time_to_tx_ns,
-      pacing->trs);
+      pacing->ptp_time_cursor, pacing->tsc_time_cursor, time_to_tx_ns, pacing->trs);
 
   return 0;
 }
@@ -2017,7 +1986,6 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       frame->tv_meta.timestamp = pacing->ptp_time_cursor;
       frame->tv_meta.rtp_timestamp = pacing->rtp_time_stamp;
       frame->tv_meta.epoch = pacing->cur_epochs;
-      /* Use dbg(): per-frame print on TX lcore would stall transmitter */
       dbg("%s(%d), frame %d start: ptp_cursor %" PRIu64 " (sub-sec %" PRIu64
           " >>7 %" PRIu64 ") rtp_ts %u epoch %" PRIu64 "\n",
           __func__, idx, next_frame_idx,
@@ -2167,18 +2135,9 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
   }
 
   if (s->st20_pkt_idx >= s->st20_total_pkts) {
-    /* Use dbg(): per-frame print on TX lcore would stall transmitter */
-#ifdef DEBUG
-    { uint64_t frame_span_ns =
-          pacing->ptp_time_cursor - s->st20_frames[s->st20_frame_idx].tv_meta.timestamp;
-    dbg("%s(%d), frame %d done: ptp_cursor_end %" PRIu64 " (sub-sec %" PRIu64
-        " >>7 %" PRIu64 ") frame_span %" PRIu64 " ns (%.3f ms)\n",
+    dbg("%s(%d), frame %d done: ptp_cursor %" PRIu64 " epoch %" PRIu64 "\n",
         __func__, idx, s->st20_frame_idx,
-        (uint64_t)pacing->ptp_time_cursor,
-        (uint64_t)(pacing->ptp_time_cursor % 1000000000ULL),
-        (uint64_t)((pacing->ptp_time_cursor % 1000000000ULL) >> 7),
-        frame_span_ns, (double)frame_span_ns / 1e6); }
-#endif
+        (uint64_t)pacing->ptp_time_cursor, (uint64_t)pacing->cur_epochs);
     /* end of current frame */
     s->st20_frame_stat = ST21_TX_STAT_WAIT_FRAME;
     s->st20_pkt_idx = 0;
@@ -3402,9 +3361,26 @@ static int tv_attach(struct mtl_main_impl* impl, struct st_tx_video_sessions_mgr
   s->tx_mono_pool = mt_user_tx_mono_pool(impl);
   s->multi_src_port = mt_user_multi_src_port(impl);
   s->ring_count = ST_TX_VIDEO_SESSIONS_RING_SIZE;
-  /* make sure the ring is smaller than total pkts */
-  while (s->ring_count > s->st20_total_pkts) {
-    s->ring_count /= 2;
+  /* For TSN LaunchTime pacing, the builder must run AHEAD of the transmitter so that
+   * LaunchTime timestamps are in the future when the NIC processes them. If the ring
+   * is smaller than a frame, NIC backpressure forces the builder to run at wire rate
+   * with zero headroom, making time_to_tx = 0 (all LaunchTimes in the past → NIC sends
+   * immediately → wrong epoch alignment / latency). With ring >= 2 * total_pkts, the
+   * builder can queue 1+ frames ahead while the transmitter drains at NIC rate. */
+  if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) {
+    uint32_t min_ring = (uint32_t)s->st20_total_pkts * 2;
+    /* rte_ring_create requires power-of-2 count */
+    uint32_t ring_po2 = 1;
+    while (ring_po2 < min_ring) ring_po2 <<= 1;
+    s->ring_count = ring_po2;
+    info("%s(%d), TSN ring %u (2 * %d pkts, rounded to po2)\n", __func__, idx,
+        s->ring_count, s->st20_total_pkts);
+  }
+  /* For non-TSN, make sure the ring is smaller than total pkts */
+  if (s->pacing_way[MTL_SESSION_PORT_P] != ST21_TX_PACING_WAY_TSN) {
+    while (s->ring_count > s->st20_total_pkts) {
+      s->ring_count /= 2;
+    }
   }
 
   if (st22_frame_ops) {
@@ -3554,7 +3530,6 @@ static void tv_stat(struct st_tx_video_sessions_mgr* mgr,
          (double)s->stat_bytes_tx[MTL_SESSION_PORT_P] * 8 / time_sec / MTL_STAT_M_UNIT,
          (double)s->stat_bytes_tx[MTL_SESSION_PORT_R] * 8 / time_sec / MTL_STAT_M_UNIT,
          s->stat_cpu_busy_score);
-
   s->stat_last_time = cur_time_ns;
   s->stat_pkts_build[MTL_SESSION_PORT_P] = 0;
   s->stat_pkts_build[MTL_SESSION_PORT_R] = 0;
