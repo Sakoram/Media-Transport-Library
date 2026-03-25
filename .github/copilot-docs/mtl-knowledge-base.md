@@ -393,11 +393,40 @@ Hardware RL has ramp-up delay. MTL sends padding packets (RTP padding bit set) b
 - Also applied at frame start in `tv_sync_pacing()` for the initial cursor
 
 ### TSN vs RL/TSC Transmitter Differences
-- **TSN transmitter** (`video_trs_launch_time_tasklet`): no timing gate — pushes all packets to NIC immediately with LaunchTime timestamps. NIC holds packets until scheduled time.
+- **TSN transmitter** (`video_trs_launch_time_tasklet`): uses TSC gate + NIC LaunchTime timestamps. Builder/transmitter paces at trs rate via TSC, NIC sends at programmed PTP LaunchTime.
 - **RL/TSC transmitter**: software-gated — waits for `cur_tsc >= target_tsc` before bursting
 - TSN **build timeout is skipped**: NIC backpressure naturally rate-limits the builder to ~frame_active_time
-- TSN **ring size enlarged** to 2048 (vs default 512): compensates for NIC holding packets in TX ring
+- TSN **ring size enlarged** to 2× total_pkts (16384 for 1080p30): holds biased-forward packets
 - TSN **inflight counts appear high** (normal): ~total_pkts × bulk in NIC TX ring at any time
+
+### TSN LaunchTime Forward Bias (czwartek17-18 discovery)
+- **Problem**: ~109µs/frame processing overhead causes accumulated drift: LTs transition from future→past over ~303 frames. Mode transition creates 6.5ms wire gap → VRX=-829.
+- **Fix**: Decouple PTP cursor (LaunchTime) from TSC cursor (builder rate). Add `lt_bias_ns = frame_time` ONLY to ptp_time_cursor. NIC always sees future LTs → always batch-per-doorbell mode → no mode transitions.
+- **`pacing->lt_bias_ns`**: uint64_t in `st_tx_video_pacing`. Set to frame_time for TSN in `tv_init_pacing()`. Applied in `tv_sync_pacing()`: `ptp_time_cursor = start_time_tai + lt_bias_ns`.
+- **Does NOT require `--nb_tx_desc 8096`**: Default 512 TX desc ring is sufficient. The NIC holds only the next ~512 packets, not the entire bias window.
+- **TRO effect**: TRO = tr_offset + lt_bias_ns ≈ 34.6ms (constant throughout epoch). pkt_ts_vs_rtp_ts measures jitter around TRO → stays <10µs → PASS.
+- **E830 dual-mode**: Future LTs → batch per doorbell (CINST narrow-compliant). Past LTs → per-descriptor (higher CINST). With bias, we FORCE future-LT mode permanently.
+
+### TSN Drift Root Cause (czwartek20 analysis)
+- **Measured drift**: +109µs/frame (PTP and TSC agree). Epoch drop every ~306 frames (~10s).
+- **Breakdown via overhead instrumentation**:
+  - Inter-frame overhead: avg 34µs, max 118µs. Dominant: `tv_notify_frame_done` pipeline callback (mutex + condvar + app callback, max 114µs). `get_next_frame`: 5µs max. `tv_sync_pacing`: 14µs max.
+  - Intra-frame overhead: ~75µs. Scheduler loop overhead (79ns avg) × 1029 bulks = ~81µs. Builder is ring-backpressure-limited (inflight_cnt ≈ every bulk → SW ring always full).
+- **Builder rate limiting**: Builder → SW ring (full, ~8192 entries) → Transmitter → NIC ring → NIC wire rate. Transmitter has per-frame TSC gate on first packet (time_to_tx wait). Effective builder frame time = NIC drain (32ms) + transmitter TSC gate + inter-frame overhead → frame_time + 109µs.
+
+### TSN Epoch Drop Suppression — FAILED (czwartek21)
+- **Approach**: Suppress epoch drops for TSN (use `next_free_frame_slot` sequential instead of snap forward).
+- **Result**: Builder lag grows unboundedly (457ms/10s). Wire = 100% frame_time utilized, ZERO slack for recovery. TSC gate bypass doesn't help because NIC is the bottleneck.
+- **Lesson**: Epoch drops ARE the only recovery mechanism. Cannot be suppressed. Must decouple PTP cursor from epoch instead.
+
+### TSN Monotonic PTP Cursor (czwartek21 fix, replaces failed suppression)
+- **Problem**: Epoch drops are required for builder recovery, but cause `ptp_time_cursor` to jump → wire gap → VRX spike → NIC mode transition.
+- **Fix**: Track `ptp_time_cursor` as monotonic counter independent of epoch. Uses Bresenham integer frame_time accumulation.
+- **New fields in `st_tx_video_pacing`**: `tsn_ptp_cursor_base`, `tsn_ptp_frame_time_int/extra/denom`, `tsn_ptp_frame_accum`, `tsn_ptp_cursor_init`
+- **Behavior**: Epoch drops snap `cur_epochs` and `tsc_time_cursor` forward (builder recovery). But `ptp_time_cursor = tsn_ptp_cursor_base` advances smoothly by frame_time — no wire gaps.
+- **RTP**: Non-epoch path derives from `ptp_time_cursor` (monotonic) → automatically sequential.
+- **Bresenham precision**: For 30fps: int=33333333, extra=10, denom=30. After 30 frames = exactly 1e9ns.
+- **128ns alignment**: Applied to `ptp_time_cursor` copy only, NOT to `tsn_ptp_cursor_base` (avoids error accumulation).
 
 ### ⚠️ Double Precision Gotcha: `uint64_t += double`
 - `pacing_forward_cursor()` does `ptp_time_cursor += trs` where cursor is `uint64_t` and trs is `double`
@@ -413,9 +442,10 @@ Frame transmission aligned to PTP epoch boundaries. Epoch = frame count since TA
 **Epoch drop condition** (in `calc_frame_count_since_epoch`):
 - `frame_count_tai = cur_ptp / frame_time` (where are we now)
 - `next_free_slot = cur_epochs + 1` (next slot we can use)
-- If `frame_count_tai > next_free_slot` → **epoch drop** (skipped frames), snap forward
+- If `frame_count_tai > next_free_slot` → **epoch drop** (skipped frames), snap forward to `frame_count_tai`
+- **TSN mode**: epoch drops happen normally (builder recovery), but `ptp_time_cursor` is monotonic (no wire gap)
 - Causes: app slow to provide frames, builder CPU-bound, ring full (transmitter backpressure), scheduler latency
-- `stat_epoch_drop` counts total skipped slots (not events)
+- `stat_epoch_drop` counts skipped slots
 - Opposite: `stat_epoch_onward` if building ahead of real time (> `max_onward_epochs` = 1 second's worth)
 
 **Transmission start time per frame**:

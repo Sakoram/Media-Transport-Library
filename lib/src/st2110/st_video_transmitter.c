@@ -456,19 +456,13 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
                                          enum mtl_session_port s_port) {
   unsigned int bulk = s->bulk;
   struct rte_ring* ring = s->ring[s_port];
-  int idx = s->idx;
-  int tx = 0;
+  int idx = s->idx, tx;
   unsigned int n;
   uint64_t target_tsc, cur_tsc;
   enum mtl_port port = mt_port_logic2phy(s->port_maps, s_port);
   struct mt_interface* inf = mt_if(impl, port);
 
-  /* Per-bulk TSC gate: pace packet submission to the NIC so that each bulk
-   * arrives just before its scheduled LaunchTime.  The NIC's LaunchTime
-   * mechanism provides sub-µs precision, but it works best when descriptors
-   * arrive in near-real-time — submitting thousands of descriptors at once
-   * overloads the NIC's TX scheduling and causes incorrect absolute timing.
-   * This mirrors the TSC transmitter's per-bulk gating approach. */
+  /* check if it's pending on the tsc */
   target_tsc = s->trs_target_tsc[s_port];
   if (target_tsc) {
     cur_tsc = mt_get_tsc(impl);
@@ -479,8 +473,8 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
         return delta < mt_sch_schedule_ns(impl) ? MTL_TASKLET_HAS_PENDING
                                                 : MTL_TASKLET_ALL_DONE;
       } else {
-        err("%s(%d,%d), invalid trs tsc cur %" PRIu64 " target %" PRIu64 "\n", __func__,
-            idx, s_port, cur_tsc, target_tsc);
+        err("%s(%d), invalid trs tsc cur %" PRIu64 " target %" PRIu64 "\n", __func__, idx,
+            cur_tsc, target_tsc);
       }
     }
     s->trs_target_tsc[s_port] = 0;
@@ -526,50 +520,53 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
     s->stat_trs_ret_code[s_port] = -STI_TSCTRS_BURST_HAS_DUMMY;
   }
 
-  if (valid_bulk > 0) {
-    /* Set LaunchTime on each valid packet */
-    for (int i = 0; i < valid_bulk; i++) {
-      uint64_t target_ptp = st_tx_mbuf_get_ptp(pkts[i]);
-      pkts[i]->ol_flags |= inf->tx_launch_time_flag;
-      *RTE_MBUF_DYNFIELD(pkts[i], inf->tx_dynfield_offset, uint64_t*) = target_ptp;
-    }
+  /* Set LaunchTime on each valid packet before TSC gate / burst. */
+  uint64_t cur_ptp_for_lt = mt_get_ptp_time(impl, MTL_PORT_P);
+  for (int i = 0; i < valid_bulk; i++) {
+    uint64_t target_ptp = st_tx_mbuf_get_ptp(pkts[i]);
+    pkts[i]->ol_flags |= inf->tx_launch_time_flag;
+    *RTE_MBUF_DYNFIELD(pkts[i], inf->tx_dynfield_offset, uint64_t*) = target_ptp;
+    /* Track how many pkts have future vs past LaunchTimes */
+    if (target_ptp > cur_ptp_for_lt)
+      s->stat_lt_future_pkts++;
+    else
+      s->stat_lt_past_pkts++;
+  }
 
-    /* TSC gate: check every bulk (not just first pkt of frame).
-     * This ensures each small batch of packets reaches the NIC just before
-     * its scheduled time, matching the TSC/RL transmitter pattern. */
-    cur_tsc = mt_get_tsc(impl);
-    target_tsc = st_tx_mbuf_get_tsc(pkts[0]);
-    if (cur_tsc < target_tsc) {
-      unsigned int i;
-      uint64_t delta = target_tsc - cur_tsc;
+  if (valid_bulk == 0) return MTL_TASKLET_HAS_PENDING;
 
-      if (likely(delta < NS_PER_S)) {
-        s->trs_target_tsc[s_port] = target_tsc;
-        /* save it on inflight */
-        s->trs_inflight_num[s_port] = valid_bulk;
-        s->trs_inflight_idx[s_port] = 0;
-        s->trs_inflight_cnt[s_port]++;
-        for (i = 0; i < valid_bulk; i++) s->trs_inflight[s_port][i] = pkts[i];
-        s->stat_trs_ret_code[s_port] = -STI_TSCTRS_TARGET_TSC_NOT_REACH;
-        return delta < mt_sch_schedule_ns(impl) ? MTL_TASKLET_HAS_PENDING
-                                                : MTL_TASKLET_ALL_DONE;
-      } else {
-        err("%s(%d), invalid tsc cur %" PRIu64 " target %" PRIu64 "\n", __func__, idx,
-            cur_tsc, target_tsc);
-      }
-    }
+  cur_tsc = mt_get_tsc(impl);
+  target_tsc = st_tx_mbuf_get_tsc(pkts[0]);
+  if (cur_tsc < target_tsc) {
+    unsigned int i;
+    uint64_t delta = target_tsc - cur_tsc;
 
-    tx = video_trs_burst(impl, s, s_port, &pkts[0], valid_bulk);
-
-    if (tx < valid_bulk) {
-      unsigned int i;
-      unsigned int remaining = valid_bulk - tx;
-
-      s->trs_inflight_num[s_port] = remaining;
+    if (likely(delta < NS_PER_S)) {
+      s->trs_target_tsc[s_port] = target_tsc;
+      /* save it on inflight */
+      s->trs_inflight_num[s_port] = valid_bulk;
       s->trs_inflight_idx[s_port] = 0;
       s->trs_inflight_cnt[s_port]++;
-      for (i = 0; i < remaining; i++) s->trs_inflight[s_port][i] = pkts[tx + i];
+      for (i = 0; i < valid_bulk; i++) s->trs_inflight[s_port][i] = pkts[i];
+      s->stat_trs_ret_code[s_port] = -STI_TSCTRS_TARGET_TSC_NOT_REACH;
+      return delta < mt_sch_schedule_ns(impl) ? MTL_TASKLET_HAS_PENDING
+                                              : MTL_TASKLET_ALL_DONE;
+    } else {
+      err("%s(%d), invalid tsc cur %" PRIu64 " target %" PRIu64 "\n", __func__, idx,
+          cur_tsc, target_tsc);
     }
+  }
+
+  tx = video_trs_burst(impl, s, s_port, &pkts[0], valid_bulk);
+
+  if (tx < valid_bulk) {
+    unsigned int i;
+    unsigned int remaining = valid_bulk - tx;
+
+    s->trs_inflight_num[s_port] = remaining;
+    s->trs_inflight_idx[s_port] = 0;
+    s->trs_inflight_cnt[s_port]++;
+    for (i = 0; i < remaining; i++) s->trs_inflight[s_port][i] = pkts[tx + i];
   }
 
   return MTL_TASKLET_HAS_PENDING;

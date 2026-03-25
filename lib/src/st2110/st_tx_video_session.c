@@ -539,6 +539,28 @@ static int tv_init_pacing(struct mtl_main_impl* impl,
   /* default VRX compensate as rl accuracy, update later in tv_train_pacing */
   pacing->pad_interval = s->st20_total_pkts;
 
+  /* TSN LaunchTime forward bias: shift all LaunchTimes forward by one frame_time
+   * so they stay in the future throughout the entire epoch drift cycle (~303 frames
+   * at 30fps).  Only applied to ptp_time_cursor (NIC sees future LTs), not to
+   * tsc_time_cursor (builder/transmitter pacing stays unchanged).
+   * Required NIC TX ring depth: bias_ns / trs ≈ frame_time / trs ≈ 4300 entries.
+   * E830 supports up to 8096 TX descriptors (--nb_tx_desc 8096). */
+  pacing->lt_bias_ns = 0;
+  if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) {
+    pacing->lt_bias_ns = (uint64_t)frame_time;
+    uint32_t nb_tx_desc = mt_if_nb_tx_desc(impl, MTL_PORT_P);
+    uint32_t required_ring = (uint32_t)(pacing->lt_bias_ns / pacing->trs) + 512;
+    if (nb_tx_desc < required_ring) {
+      warn("%s[%02d], TSN lt_bias requires nb_tx_desc >= %u (have %u). "
+           "Use --nb_tx_desc %u for narrow compliance.\n",
+           __func__, idx, required_ring, nb_tx_desc, required_ring);
+    }
+    info("%s[%02d], TSN LaunchTime bias: %" PRIu64 "ns (%.2fms), "
+         "ring depth needed: %u, have: %u\n",
+         __func__, idx, pacing->lt_bias_ns, pacing->lt_bias_ns / 1e6,
+         required_ring, nb_tx_desc);
+  }
+
   /* E830 NIC LaunchTime quantizes timestamps to 128ns. Enable ptp_time_cursor
    * alignment for TSN pacing to prevent cumulative truncation error. */
   pacing->ptp_cursor_128ns_align =
@@ -560,6 +582,18 @@ static int tv_init_pacing(struct mtl_main_impl* impl,
         pacing->trs_128ns_ticks_base * 128, pacing->trs_128ns_ticks_extra,
         pacing->trs_128ns_total_pkts, total_ticks,
         (double)(total_ticks * 128) / 1e6);
+
+    /* Bresenham frame_time for monotonic PTP cursor.
+     * Exact: sum over fps_mul frames = NS_PER_S * fps_den. */
+    uint64_t ns_x_den = (uint64_t)NS_PER_S * s->fps_tm.den;
+    pacing->tsn_ptp_frame_time_int = (uint32_t)(ns_x_den / s->fps_tm.mul);
+    pacing->tsn_ptp_frame_time_extra = (uint32_t)(ns_x_den % s->fps_tm.mul);
+    pacing->tsn_ptp_frame_time_denom = s->fps_tm.mul;
+    pacing->tsn_ptp_cursor_init = false;
+    pacing->tsn_ptp_frame_accum = 0;
+    info("%s[%02d], TSN monotonic frame_time: int=%u extra=%u/%u\n",
+         __func__, idx, pacing->tsn_ptp_frame_time_int,
+         pacing->tsn_ptp_frame_time_extra, pacing->tsn_ptp_frame_time_denom);
   }
 
   info("%s[%02d], pacing params: trs=%.4f frame_time=%.2f tr_offset=%.2f\n"
@@ -617,6 +651,14 @@ static int tv_init_pacing(struct mtl_main_impl* impl,
   } else if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSC_NARROW) {
     /* tsc narrow use single bulk for better accuracy */
     s->bulk = 1;
+  } else if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) {
+    /* TSN: compensate VRX for bulk batching.
+     * With bulk=4 the NIC sends 4 descs near-simultaneously per doorbell,
+     * creating a VRX band of width (bulk-1)=3.  Position the band at
+     * [5,6,7,8] to maximize bottom headroom (5 TRS ≈ 39µs) against NIC
+     * TX scheduling stalls that occasionally produce 63-85µs inter-bulk
+     * gaps.  Top sits at wide limit (8) which is safe empirically. */
+    pacing->vrx -= (s->bulk - 1); /* compensate for bulk batching */
   } else {
     pacing->vrx -= (s->bulk - 1); /* compensate for bulk */
   }
@@ -708,12 +750,23 @@ static inline uint64_t calc_frame_count_since_epoch(struct st_tx_video_session_i
     }
 
   } else {
+    /* Epoch drop: builder is behind real time.  Snap forward to catch up.
+     * For TSN with monotonic PTP cursor, the wire-side ptp_time_cursor is
+     * decoupled from cur_epochs — it advances by exactly frame_time each
+     * frame regardless of epoch jumps.  So epoch drops recover the builder
+     * without causing wire-time gaps or NIC mode transitions. */
     notice("%s(%d), EPOCH DROP: frame_count_tai %" PRIu64 " > next_free %" PRIu64
-        " (drop %" PRIu64 "), cur_tai %" PRIu64 " frame_time %.2f\n",
+        " (drop %" PRIu64 "), prev_epoch %" PRIu64
+        " cur_tai %" PRIu64 " frame_time %.2f\n",
         __func__, s->idx, frame_count_tai, next_free_frame_slot,
-        frame_count_tai - next_free_frame_slot, cur_tai, s->pacing.frame_time);
+        frame_count_tai - next_free_frame_slot, s->pacing.cur_epochs,
+        cur_tai, s->pacing.frame_time);
     ST_SESSION_STAT_ADD(s, port_user_stats.common, stat_epoch_drop,
                         (frame_count_tai - next_free_frame_slot));
+    /* Capture state for detailed logging in tv_sync_pacing */
+    s->stat_epoch_drop_prev_epoch = s->pacing.cur_epochs;
+    s->stat_epoch_drop_new_epoch = frame_count_tai;
+    s->stat_epoch_drop_pending = true;
 
     if (s->ops.notify_frame_late) {
       s->ops.notify_frame_late(s->ops.priv, frame_count_tai - next_free_frame_slot);
@@ -742,22 +795,30 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
   }
   time_to_tx_ns = start_time_tai - cur_tai;
 
-  /* For LaunchTime pacing, the NIC needs LaunchTime values in the future.
-   * If the current epoch's start time has already passed (time_to_tx <= 0),
-   * advance to the next epoch so the schedule is ~1 frame ahead.
-   * This check must happen BEFORE the negative clamp below, otherwise the
-   * clamp sets time_to_tx=0 and this condition triggers every frame, causing
-   * the system to skip every other epoch (fps=24 instead of 30).
-   * In steady state, the builder runs ~1 frame ahead so time_to_tx > 0 and
-   * this branch does not fire. */
-  if (pacing->ptp_cursor_128ns_align && time_to_tx_ns <= 0) {
-    pacing->cur_epochs++;
-    start_time_tai = transmission_start_time(pacing, pacing->cur_epochs);
-    time_to_tx_ns = start_time_tai - cur_tai;
-  }
+  /* For LaunchTime pacing (TSN), the builder is rate-limited by NIC TX ring
+   * backpressure and naturally finishes each frame a few ms after the next
+   * epoch's transmission start. A small negative time_to_tx is expected:
+   * initial packets get slightly-past LaunchTimes (NIC sends immediately
+   * while TSC gate still provides pacing), and the majority of the frame's
+   * packets still have future LaunchTimes for precise NIC scheduling.
+   * Do NOT advance cur_epochs here — doing so causes the builder to skip
+   * every ~5th frame, resulting in 24fps instead of 30fps. Large lags are
+   * already handled by calc_frame_count_since_epoch() via EPOCH DROP. */
 
-  if (time_to_tx_ns < 0) {
-    /* should never happen, but it does. TODO: check why */
+  /* Track epoch progression for diagnostics via stat counter only.
+   * No per-frame logging here — even info() level I/O in the hot path
+   * can slow the scheduler enough to prevent lag recovery. */
+
+  if (pacing->ptp_cursor_128ns_align) {
+    /* TSN: allow negative time_to_tx to propagate to tsc_time_cursor.
+     * When the builder is behind, tsc_time_cursor < cur_tsc, so the first
+     * N = abs(time_to_tx) / trs packets bypass the TSC gate in both the
+     * builder and transmitter.  This self-correcting catch-up mechanism
+     * lets the frame complete faster (e.g. 29ms instead of 32ms when 3ms
+     * behind), recovering the lag at ~1-3ms per frame.  NIC LaunchTime
+     * deltas still control on-wire pacing, so Cinst is unaffected. */
+  } else if (time_to_tx_ns < 0) {
+    /* Non-TSN: clamp to zero (original behaviour). */
     dbg("%s(%d), negative time_to_tx_ns detected: %ld ns. Current PTP time: %" PRIu64
         "\n",
         __func__, s->idx, time_to_tx_ns, cur_tai);
@@ -769,13 +830,83 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
   pacing->tsc_time_cursor = cur_tsc + time_to_tx_ns;
 
   pacing->tsc_time_frame_start = pacing->tsc_time_cursor;
-  pacing->ptp_time_cursor = start_time_tai;
+
   if (pacing->ptp_cursor_128ns_align) {
-    /* Align initial ptp cursor to 128ns boundary for deterministic NIC scheduling */
+    /* TSN: monotonic PTP cursor, independent of epoch drops.
+     * Advances by exactly frame_time each frame using Bresenham integer math.
+     * Epoch drops snap cur_epochs/tsc_time_cursor forward (builder recovery),
+     * but ptp_time_cursor stays smooth — no wire-time gaps, no NIC mode
+     * transitions. lt_bias_ns keeps all LaunchTimes in the future. */
+    if (!pacing->tsn_ptp_cursor_init) {
+      /* First frame: seed from epoch-derived start time + bias */
+      pacing->tsn_ptp_cursor_base = start_time_tai + pacing->lt_bias_ns;
+      pacing->tsn_ptp_cursor_init = true;
+      pacing->tsn_ptp_frame_accum = 0;
+    } else {
+      /* Subsequent frames: advance by exactly one frame_time (Bresenham) */
+      uint64_t step = pacing->tsn_ptp_frame_time_int;
+      pacing->tsn_ptp_frame_accum += pacing->tsn_ptp_frame_time_extra;
+      if (pacing->tsn_ptp_frame_accum >= pacing->tsn_ptp_frame_time_denom) {
+        step++;
+        pacing->tsn_ptp_frame_accum -= pacing->tsn_ptp_frame_time_denom;
+      }
+      pacing->tsn_ptp_cursor_base += step;
+    }
+    pacing->ptp_time_cursor = pacing->tsn_ptp_cursor_base;
+    /* Align to 128ns boundary for NIC LaunchTime quantization */
     pacing->ptp_time_cursor = ((pacing->ptp_time_cursor + 127) >> 7) << 7;
-    /* Reset Bresenham accumulator for the new frame */
+    /* Reset per-packet Bresenham accumulator for the new frame */
     pacing->trs_128ns_accum = 0;
+  } else {
+    /* Non-TSN: epoch-derived PTP cursor (original behavior) */
+    pacing->ptp_time_cursor = start_time_tai + pacing->lt_bias_ns;
   }
+
+  /* Log detailed state at epoch drop for VRX debugging */
+  if (s->stat_epoch_drop_pending) {
+    s->stat_epoch_drop_pending = false;
+    s->stat_epoch_drop_time_to_tx = time_to_tx_ns;
+    notice("%s(%d), EPOCH DROP PACING: prev_epoch %" PRIu64 " -> new_epoch %" PRIu64
+           " time_to_tx %" PRId64 "us start_tai %" PRIu64
+           " ptp_cursor %" PRIu64 " cur_tai %" PRIu64 "\n",
+           __func__, s->idx, s->stat_epoch_drop_prev_epoch,
+           s->stat_epoch_drop_new_epoch, time_to_tx_ns / 1000,
+           start_time_tai, pacing->ptp_time_cursor, cur_tai);
+  }
+
+  /* Track time_to_tx_ns min/max for TSN diagnostics.  These aggregate stats
+   * reveal steady-state builder lag without per-frame logging in the hot path. */
+  if (!s->stat_time_to_tx_init) {
+    s->stat_time_to_tx_min = time_to_tx_ns;
+    s->stat_time_to_tx_max = time_to_tx_ns;
+    s->stat_time_to_tx_init = true;
+    s->stat_ptp_elapsed_sum = 0;
+    s->stat_tsc_elapsed_sum = 0;
+    s->stat_sync_count = 0;
+    s->stat_ttx_future = 0;
+    s->stat_ttx_borderline = 0;
+    s->stat_ttx_past = 0;
+  } else {
+    if (time_to_tx_ns < s->stat_time_to_tx_min) s->stat_time_to_tx_min = time_to_tx_ns;
+    if (time_to_tx_ns > s->stat_time_to_tx_max) s->stat_time_to_tx_max = time_to_tx_ns;
+    /* Track time_to_tx histogram for LaunchTime future/past analysis */
+    if (time_to_tx_ns > 1000000) /* >+1ms */
+      s->stat_ttx_future++;
+    else if (time_to_tx_ns < -1000000) /* <-1ms */
+      s->stat_ttx_past++;
+    else
+      s->stat_ttx_borderline++;
+    /* Track elapsed delta from ideal frame_time between consecutive sync calls */
+    int64_t ptp_delta = (int64_t)(cur_tai - s->stat_last_sync_ptp) -
+                        (int64_t)pacing->frame_time;
+    int64_t tsc_delta = (int64_t)(cur_tsc - s->stat_last_sync_tsc) -
+                        (int64_t)pacing->frame_time;
+    s->stat_ptp_elapsed_sum += ptp_delta;
+    s->stat_tsc_elapsed_sum += tsc_delta;
+    s->stat_sync_count++;
+  }
+  s->stat_last_sync_ptp = cur_tai;
+  s->stat_last_sync_tsc = cur_tsc;
 
   dbg("%s(%d), epoch %" PRIu64 " start_tai %" PRIu64 " ptp_cursor %" PRIu64
       " tsc_cursor %" PRIu64 " time_to_tx %" PRId64 " trs %.4f\n",
@@ -810,6 +941,9 @@ static void tv_update_rtp_time_stamp(struct st_tx_video_session_impl* s,
     if (s->ops.flags & ST20_TX_FLAG_RTP_TIMESTAMP_EPOCH) {
       tai_for_rtp_ts = tai_from_frame_count(pacing, pacing->cur_epochs);
     } else {
+      /* Default path: derive RTP from ptp_time_cursor.
+       * For TSN, ptp_time_cursor is monotonic and includes lt_bias_ns,
+       * so RTP timestamps advance smoothly even across epoch drops. */
       tai_for_rtp_ts = pacing->ptp_time_cursor;
     }
     tai_for_rtp_ts += delta_ns;
@@ -1921,8 +2055,10 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       tv_init_next_meta(s, &meta);
       /* Query next frame buffer idx */
       bool time_measure = mt_sessions_time_measure(impl);
+      uint64_t tsc_pre_getframe = mt_get_tsc(impl);
       if (time_measure) tsc_start = mt_get_tsc(impl);
       ret = ops->get_next_frame(ops->priv, &next_frame_idx, &meta);
+      uint64_t tsc_post_getframe = mt_get_tsc(impl);
       if (time_measure) {
         uint32_t delta_us = (mt_get_tsc(impl) - tsc_start) / NS_PER_US;
         s->stat_max_next_frame_us = RTE_MAX(s->stat_max_next_frame_us, delta_us);
@@ -1981,6 +2117,22 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
         s->second_field = !frame->tv_meta.second_field;
       }
       tv_sync_pacing(impl, s, required_tai);
+      /* Measure per-frame overhead breakdown */
+      {
+        uint64_t tsc_after_sync = mt_get_tsc(impl);
+        if (s->stat_frame_done_tsc) {
+          uint64_t total = tsc_after_sync - s->stat_frame_done_tsc;
+          uint64_t getframe = tsc_post_getframe - tsc_pre_getframe;
+          uint64_t notify = tsc_pre_getframe - s->stat_frame_done_tsc;
+          uint64_t sync = tsc_after_sync - tsc_post_getframe;
+          if (total > s->stat_overhead_total_ns) s->stat_overhead_total_ns = total;
+          if (notify > s->stat_overhead_notify_ns) s->stat_overhead_notify_ns = notify;
+          if (getframe > s->stat_overhead_getframe_ns) s->stat_overhead_getframe_ns = getframe;
+          if (sync > s->stat_overhead_sync_ns) s->stat_overhead_sync_ns = sync;
+          s->stat_overhead_sum_ns += total;
+          s->stat_overhead_count++;
+        }
+      }
       tv_update_rtp_time_stamp(s, meta.tfmt, meta.timestamp);
       frame->tv_meta.tfmt = ST10_TIMESTAMP_FMT_TAI;
       frame->tv_meta.timestamp = pacing->ptp_time_cursor;
@@ -2138,6 +2290,8 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
     dbg("%s(%d), frame %d done: ptp_cursor %" PRIu64 " epoch %" PRIu64 "\n",
         __func__, idx, s->st20_frame_idx,
         (uint64_t)pacing->ptp_time_cursor, (uint64_t)pacing->cur_epochs);
+    /* Record TSC at frame completion for overhead measurement */
+    s->stat_frame_done_tsc = mt_get_tsc(impl);
     /* end of current frame */
     s->st20_frame_stat = ST21_TX_STAT_WAIT_FRAME;
     s->st20_pkt_idx = 0;
@@ -3562,13 +3716,55 @@ static void tv_stat(struct st_tx_video_sessions_mgr* mgr,
     s->stat_trans_recalculate_warmup = 0;
   }
   if (s->stat_epoch_drop) {
-    notice("TX_VIDEO_SESSION(%d,%d): epoch drop %u\n", m_idx, idx, s->stat_epoch_drop);
+    notice("TX_VIDEO_SESSION(%d,%d): epoch drop %u%s\n", m_idx, idx, s->stat_epoch_drop,
+           (s->pacing.ptp_cursor_128ns_align) ? " (monotonic PTP cursor)" : "");
     s->stat_epoch_drop = 0;
   }
   if (s->stat_epoch_onward) {
     notice("TX_VIDEO_SESSION(%d,%d): epoch onward %u\n", m_idx, idx,
            s->stat_epoch_onward);
     s->stat_epoch_onward = 0;
+  }
+  if (s->stat_time_to_tx_init) {
+    notice("TX_VIDEO_SESSION(%d,%d): time_to_tx min %" PRId64 "us max %" PRId64 "us\n",
+           m_idx, idx, s->stat_time_to_tx_min / 1000, s->stat_time_to_tx_max / 1000);
+    if (s->stat_sync_count > 0) {
+      int64_t ptp_avg_drift_ns = s->stat_ptp_elapsed_sum / (int64_t)s->stat_sync_count;
+      int64_t tsc_avg_drift_ns = s->stat_tsc_elapsed_sum / (int64_t)s->stat_sync_count;
+      notice("TX_VIDEO_SESSION(%d,%d): drift ptp_avg %+" PRId64 "ns tsc_avg %+" PRId64
+             "ns per frame (n=%u)\n",
+             m_idx, idx, ptp_avg_drift_ns, tsc_avg_drift_ns, s->stat_sync_count);
+      notice("TX_VIDEO_SESSION(%d,%d): ttx_bands future=%u borderline=%u past=%u\n",
+             m_idx, idx, s->stat_ttx_future, s->stat_ttx_borderline, s->stat_ttx_past);
+      if (s->stat_lt_future_pkts || s->stat_lt_past_pkts) {
+        uint32_t total_lt = s->stat_lt_future_pkts + s->stat_lt_past_pkts;
+        notice("TX_VIDEO_SESSION(%d,%d): lt_pkts future=%u(%.1f%%) past=%u(%.1f%%)\n",
+               m_idx, idx,
+               s->stat_lt_future_pkts,
+               total_lt ? 100.0 * s->stat_lt_future_pkts / total_lt : 0.0,
+               s->stat_lt_past_pkts,
+               total_lt ? 100.0 * s->stat_lt_past_pkts / total_lt : 0.0);
+        s->stat_lt_future_pkts = 0;
+        s->stat_lt_past_pkts = 0;
+      }
+      if (s->stat_overhead_count > 0) {
+        uint64_t avg_us = s->stat_overhead_sum_ns / s->stat_overhead_count / 1000;
+        notice("TX_VIDEO_SESSION(%d,%d): frame_overhead avg=%" PRIu64
+               "us max=%" PRIu64 "us (notify_max=%" PRIu64 "us getframe_max=%" PRIu64
+               "us sync_max=%" PRIu64 "us) n=%u\n",
+               m_idx, idx, avg_us, s->stat_overhead_total_ns / 1000,
+               s->stat_overhead_notify_ns / 1000, s->stat_overhead_getframe_ns / 1000,
+               s->stat_overhead_sync_ns / 1000, s->stat_overhead_count);
+        s->stat_overhead_total_ns = 0;
+        s->stat_overhead_notify_ns = 0;
+        s->stat_overhead_getframe_ns = 0;
+        s->stat_overhead_sync_ns = 0;
+        s->stat_overhead_sum_ns = 0;
+        s->stat_overhead_count = 0;
+      }
+
+    }
+    s->stat_time_to_tx_init = false;
   }
   if (s->stat_exceed_frame_time) {
     notice("TX_VIDEO_SESSION(%d,%d): build timeout frames %u\n", m_idx, idx,

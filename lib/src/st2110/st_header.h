@@ -203,6 +203,23 @@ struct st_tx_video_pacing {
   uint32_t trs_128ns_ticks_extra; /* extra ticks to distribute (Bresenham numerator) */
   uint32_t trs_128ns_total_pkts;  /* total pkts per frame (Bresenham denominator) */
   uint32_t trs_128ns_accum;       /* Bresenham accumulator, reset per frame */
+
+  /* TSN LaunchTime forward bias: added only to ptp_time_cursor (NIC LaunchTime),
+   * NOT to tsc_time_cursor (builder/transmitter rate).  This keeps all LaunchTimes
+   * in the future throughout the entire epoch drift cycle, preventing the NIC from
+   * switching to per-descriptor immediate-send mode when drift pushes LTs past. */
+  uint64_t lt_bias_ns;
+
+  /* TSN monotonic PTP cursor: advances by exactly frame_time each frame,
+   * independent of epoch drops.  Epoch drops snap the builder forward (recovery),
+   * but the PTP cursor stays smooth (no wire-time gaps, no NIC mode transitions).
+   * Uses Bresenham integer arithmetic for exact frame_time accumulation. */
+  uint64_t tsn_ptp_cursor_base;       /* monotonic PTP base (ns), updated per frame */
+  uint32_t tsn_ptp_frame_accum;       /* Bresenham accumulator for frame_time */
+  uint32_t tsn_ptp_frame_time_int;    /* integer part: (NS_PER_S * den) / mul */
+  uint32_t tsn_ptp_frame_time_extra;  /* remainder:    (NS_PER_S * den) % mul */
+  uint32_t tsn_ptp_frame_time_denom;  /* denominator:  mul (fps numerator) */
+  bool tsn_ptp_cursor_init;           /* false until first frame */
 };
 
 enum st20_packet_type {
@@ -407,6 +424,9 @@ struct st_tx_video_session_impl {
   uint32_t stat_trans_troffset_mismatch; /* transmitter mismatch the epoch troffset */
   uint32_t stat_trans_recalculate_warmup;
   uint32_t stat_exceed_frame_time;
+  /* TSN LaunchTime direction counters (set in transmitter) */
+  uint32_t stat_lt_future_pkts;  /* LaunchTime was in the future at submission */
+  uint32_t stat_lt_past_pkts;    /* LaunchTime was in the past at submission */
   bool stat_user_busy_first;
   uint32_t stat_user_busy;       /* get_next_frame or dequeue_bulk from rtp ring fail */
   uint32_t stat_lines_not_ready; /* query app lines not ready */
@@ -418,6 +438,33 @@ struct st_tx_video_session_impl {
   uint32_t stat_max_notify_frame_us;
   uint32_t stat_unrecoverable_error;
   uint32_t stat_recoverable_error;
+  /* TSN pacing diagnostics: time_to_tx_ns at each tv_sync_pacing() call */
+  int64_t stat_time_to_tx_min;
+  int64_t stat_time_to_tx_max;
+  bool stat_time_to_tx_init; /* false until first sample recorded */
+  /* TSN drift diagnostics: PTP and TSC elapsed between consecutive sync calls */
+  uint64_t stat_last_sync_ptp; /* PTP time at last tv_sync_pacing */
+  uint64_t stat_last_sync_tsc; /* TSC time at last tv_sync_pacing */
+  int64_t stat_ptp_elapsed_sum; /* sum of (ptp_elapsed - frame_time) in ns */
+  int64_t stat_tsc_elapsed_sum; /* sum of (tsc_elapsed - frame_time) in ns */
+  uint32_t stat_sync_count; /* number of tv_sync_pacing calls in this stat period */
+  /* TSN epoch drop diagnostics */
+  uint64_t stat_epoch_drop_prev_epoch; /* cur_epochs before drop */
+  uint64_t stat_epoch_drop_new_epoch;  /* cur_epochs after drop */
+  int64_t stat_epoch_drop_time_to_tx;  /* time_to_tx at drop frame */
+  bool stat_epoch_drop_pending;        /* drop happened, needs logging in tv_sync_pacing */
+  /* TSN time_to_tx histogram bands */
+  uint32_t stat_ttx_future;     /* time_to_tx > +1ms (LTs solidly in future) */
+  uint32_t stat_ttx_borderline; /* time_to_tx -1ms..+1ms (LTs crossing zero) */
+  uint32_t stat_ttx_past;       /* time_to_tx < -1ms (LTs in past) */
+  /* TSN per-frame overhead breakdown (between last pkt of frame N and first pkt of frame N+1) */
+  uint64_t stat_frame_done_tsc;      /* TSC at frame completion (last pkt enqueued) */
+  uint64_t stat_overhead_total_ns;   /* max total overhead: frame_done → sync_pacing done */
+  uint64_t stat_overhead_notify_ns;  /* max time in tv_notify_frame_done / pipeline callback */
+  uint64_t stat_overhead_getframe_ns; /* max time in get_next_frame callback */
+  uint64_t stat_overhead_sync_ns;    /* max time in tv_sync_pacing */
+  uint64_t stat_overhead_sum_ns;     /* sum of total overhead for averaging */
+  uint32_t stat_overhead_count;      /* count of measured frames */
   /* interlace */
   uint32_t stat_interlace_first_field;
   uint32_t stat_interlace_second_field;
