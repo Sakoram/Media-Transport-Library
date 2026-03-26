@@ -220,6 +220,16 @@ struct st_tx_video_pacing {
   uint32_t tsn_ptp_frame_time_extra;  /* remainder:    (NS_PER_S * den) % mul */
   uint32_t tsn_ptp_frame_time_denom;  /* denominator:  mul (fps numerator) */
   bool tsn_ptp_cursor_init;           /* false until first frame */
+
+  /* TSN RTP clock: exact per-frame media-clock progression, decoupled from LT.
+   * This keeps inter-frame RTP delta exact even if LaunchTime needs frame-
+   * boundary correction. */
+  uint32_t tsn_rtp_frame_accum;       /* Bresenham accumulator for RTP frame ticks */
+  uint32_t tsn_rtp_frame_ticks_int;   /* integer part: (sampling_rate * den) / mul */
+  uint32_t tsn_rtp_frame_ticks_extra; /* remainder:    (sampling_rate * den) % mul */
+  uint32_t tsn_rtp_frame_ticks_denom; /* denominator:  mul (fps numerator) */
+  bool tsn_rtp_init;                  /* false until first frame */
+  uint64_t tsn_rtp_last_epoch;        /* last epoch used for TSN RTP progression */
 };
 
 enum st20_packet_type {
@@ -465,6 +475,17 @@ struct st_tx_video_session_impl {
   uint64_t stat_overhead_sync_ns;    /* max time in tv_sync_pacing */
   uint64_t stat_overhead_sum_ns;     /* sum of total overhead for averaging */
   uint32_t stat_overhead_count;      /* count of measured frames */
+  /* TSN work-conserving diagnostics */
+  uint32_t stat_tsn_build_calls;     /* tv_tasklet_frame() calls that built >=1 bulk */
+  uint64_t stat_tsn_build_bulks_sum; /* total bulks built across those calls */
+  uint32_t stat_tsn_build_bulks_max; /* max bulks built in one call */
+  uint32_t stat_tsn_build_ring_peak; /* max SW ring occupancy seen by builder */
+  uint32_t stat_tsn_build_ring_stop; /* builder stopped due to low ring headroom */
+  uint32_t stat_tsn_tx_calls;        /* TSN transmitter calls that sent >=1 bulk */
+  uint64_t stat_tsn_tx_bulks_sum;    /* total bulks sent across those calls */
+  uint32_t stat_tsn_tx_bulks_max;    /* max bulks sent in one call */
+  uint32_t stat_tsn_tx_ring_peak;    /* max SW ring occupancy seen by transmitter */
+  uint32_t stat_tsn_tx_partial;      /* partial tx_burst events in TSN transmitter */
   /* interlace */
   uint32_t stat_interlace_first_field;
   uint32_t stat_interlace_second_field;

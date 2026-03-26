@@ -2,6 +2,445 @@
 
 ## Current State: czwartek22-pending — Monotonic PTP cursor implemented
 
+### czwartek22 retest (after TSN ring init fix) — ring fix worked, but exposed the REAL bottleneck
+
+**Key log lines:**
+```
+epoch drop 1
+time_to_tx min -32096us max 1196us
+drift ptp_avg +223008ns tsc_avg +222993ns per frame (n=297)
+ttx_bands future=6 borderline=0 past=291
+lt_pkts future=0(0.0%) past=1226322(100.0%)
+frame_overhead avg=33303us max=39863us (notify_max=39859us getframe_max=7us sync_max=18us)
+tsn_loops build_avg=31.18 build_max=32 tx_avg=5.00 tx_max=32 ring_peak=7740/7740 ring_stop=0 tx_partial=76564
+busy as no ready frame from user 298
+2 frames are in trans, total 2
+```
+
+**What changed vs previous run:**
+- `ring_peak=7740/7740` proves the TSN ring-size init bug is fixed. We are no longer stuck on ~512.
+- `ring_stop=0` proves the builder is no longer throttled by the SW ring.
+- `build_avg=31.18/32` proves the work-conserving builder now runs as intended.
+
+**What did NOT improve:**
+- `tx_avg=5.00`, `tx_partial=76564`, `lt_pkts future=0` → the real backpressure is now **downstream of the SW ring**.
+- All packets are still transmitted with **past LaunchTimes**.
+- `epoch drop 1` remains.
+- `drift` got WORSE: ~223µs/frame vs prior ~109µs/frame class.
+
+**Critical new finding:** `frame_overhead avg=33303us`, dominated by `notify_max=39859us`, is NOT scheduler/PTP cost.
+This is effectively **one frame period of delay in the frame-done path**.
+
+Interpretation:
+- `getframe_max=7us`, `sync_max=18us` remain tiny.
+- The entire inter-frame budget is now burned in the path from frame completion to the next frame becoming available.
+- `busy as no ready frame from user 298` confirms the builder is usually waiting for the app/pipeline to recycle a frame.
+- The TSN ring enlargement allowed much deeper downstream buffering, so frame ownership now returns too late for the pipeline/app cadence.
+
+### New pcap (`mypcap-gpt2`) — one epoch-drop step, but stream is already in past-LT mode
+
+Analyzer summary:
+- `CINST`: **NARROW compliant** (`0:98.8%, 1:1.2%`)
+- `VRX`: **FAIL** (`-2138:72.1%, -1285:27.9%`)
+- `packet_ts_vs_rtp_ts`: **FAIL** (`143.37ms .. 150.00ms`, avg `148.17ms`)
+- `TRO`: `11.27ms .. 17.90ms`, avg `16.07ms` (default is `1.274ms`)
+- `inter_frame_rtp_ts`: exact `3000`
+
+Deep pcap readout (30 frames):
+- Intra-frame packet spacing is stable **6–9µs** with `P50≈7.9µs` for the entire capture.
+- So the NIC is already in **per-descriptor / past-LT mode for the whole capture**.
+- Frame 8→9 has a single large inter-frame gap: **39.966ms** instead of **33.333ms**.
+- Extra gap = **6.632ms**, after which all following frames stay shifted by **+6.632ms**.
+
+That exactly matches the two VRX/TRO plateaus:
+- pre-drop plateau: TRO ≈ **11.27ms**, VRX ≈ **-1285**
+- post-drop plateau: TRO ≈ **17.90ms**, VRX ≈ **-2138**
+- delta: **~6.632ms = ~853 TRS**, and `-1285 - 853 = -2138`
+
+**Important implication:**
+- The monotonic PTP cursor avoids wild phase churn, but it does **NOT** keep packets future-LT under the current queue/callback behavior.
+- The ring fix did not reveal a wire-rate shortage. It revealed a **frame-lifecycle / wakeup / callback coupling problem** plus downstream TX queue backpressure.
+
+### Revised hypothesis (current best)
+
+The first hard limit is now:
+1. Builder fills the large SW ring correctly.
+2. Transmitter/NIC remain backpressured (`tx_partial` huge), so descriptors accumulate downstream.
+3. Frame buffers are not recycled promptly because frame completion depends on the last packet DMA completion.
+4. `tv_notify_frame_done()` / pipeline frame-done callback path becomes frame-period-scale.
+5. App/pipeline wakeup for the next frame is therefore delayed by ~1 frame, seen as `notify_max≈39.9ms` and `busy as no ready frame from user 298`.
+6. Packets stay past-LT, and an epoch drop still inserts a one-time +6.6ms wire shift.
+
+### Design consequence
+
+The next fix should focus on **frame-lifecycle decoupling**, not bigger rings:
+- decouple/block-proof the frame-done callback path
+- avoid making next-frame availability wait on potentially blocking app callbacks
+- bound downstream queue depth so RTP/wire latency does not balloon into 100ms-class pkt_ts error
+- then revisit a future-LT servo only after frame recycling is no longer frame-period-blocked
+
+### Applied fix (2026-03-25, frame lifecycle decoupling — phase 1)
+
+Implemented in:
+- [lib/src/st2110/pipeline/st20_pipeline_tx.c](lib/src/st2110/pipeline/st20_pipeline_tx.c)
+- [lib/src/st2110/pipeline/st22_pipeline_tx.c](lib/src/st2110/pipeline/st22_pipeline_tx.c)
+- [lib/src/st2110/pipeline/st30_pipeline_tx.c](lib/src/st2110/pipeline/st30_pipeline_tx.c)
+- [lib/src/st2110/pipeline/st40_pipeline_tx.c](lib/src/st2110/pipeline/st40_pipeline_tx.c)
+
+Change:
+- when a TX pipeline frame transitions to `FREE` in `frame_done` / `late_frame_drop`,
+  the internal blocking `get_frame()` waiter is now woken **immediately**
+- app `notify_frame_done` / `notify_frame_late` still runs afterward
+- existing `notify_frame_available` callback path remains in place for compatibility
+
+Purpose:
+- break the hidden dependency: `frame reusable` ⇒ wait for app callback return
+- for `block_get` apps (RxTxApp path), next frame reuse should no longer be delayed by a slow callback executed on the tasklet context
+
+Expected next-log signals if this is the right fix:
+- `frame_overhead avg` drops sharply from ~33ms
+- `notify_max` drops sharply from ~40ms
+- `busy as no ready frame from user` drops a lot or disappears
+- more non-past `ttx_bands`
+- some non-zero future `lt_pkts`
+- fewer or zero epoch drops
+
+### Result of phase-1 frame lifecycle decoupling
+
+**No observable effect** on RxTxApp TSN run.
+
+Why the hypothesis was wrong:
+- RxTxApp TX path uses `ST20P_TX_FLAG_BLOCK_GET` and a dedicated producer thread in
+  [tests/tools/RxTxApp/src/tx_st20p_app.c](tests/tools/RxTxApp/src/tx_st20p_app.c#L65-L109)
+- it does **not** register `notify_frame_done` / `notify_frame_available` callbacks
+- so the earlier callback-decoupling patch is effectively a no-op for this workload
+
+Also, the `frame_overhead` metric was over-interpreted:
+- `stat_frame_done_tsc` is captured at the **end of frame build/enqueue**, not at final wire completion
+- so `notify_max≈40ms` mostly reflects the app waiting for the next reusable frame with only 2 TX framebuffers, not callback execution time
+
+### Revised root cause after gpt3
+
+- TSN builder path is healthy (`build_avg=31.18`, `ring_stop=0`)
+- pcap still shows one epoch-drop-induced **+6.63ms** phase step
+- all LaunchTimes are still past (`lt_pkts future=0`)
+- RxTxApp has `2 frames are in trans`, and the SW ring peaks at ~1.9 frames
+
+**Current best hypothesis**:
+- one-frame LT bias is no longer enough once the work-conserving TSN path can keep almost two frames buffered downstream
+- packets spend too long in `SW ring + NIC TXQ`, so they still reach the NIC with past LaunchTimes
+- once everything is past-LT, the stream stays in the same per-descriptor mode and epoch drops still cause the +6.63ms step
+
+### Applied fix (2026-03-25, TSN downstream lead phase)
+
+Implemented in [lib/src/st2110/st_tx_video_session.c](lib/src/st2110/st_tx_video_session.c):
+- increased TSN `lt_bias_ns` from **1 frame** to **2 frames**
+- increased TSN SW ring target from `2 * pkts` to `2 * pkts + 512 margin` (1080p30 -> 16384)
+- changed diagnostics to report combined downstream queue budget: `sw_ring + txq`
+
+Purpose:
+- keep LaunchTimes future despite nearly two frames already buffered downstream
+- give the NIC enough future lead to remain in the intended LaunchTime mode
+
+What to check next:
+- startup should show larger TSN bias and larger TSN ring
+- `lt_pkts future` should become non-zero, ideally dominant
+- `ttx_bands future/borderline` should improve materially
+- pcap should stop showing the +6.63ms phase step
+- `packet_ts_vs_rtp_ts` and `VRX` should improve if future-LT is restored
+
+### New finding after gpt4
+
+The two-frame LT lead also had **no effect**. This exposed a more basic source-side limit:
+
+- RxTxApp hardcodes `ops.framebuff_cnt = 2` in
+  [tests/tools/RxTxApp/src/tx_st20p_app.c](tests/tools/RxTxApp/src/tx_st20p_app.c#L301-L309)
+- logs consistently show `2 frames are in trans, total 2`
+- builder also reports `busy as no ready frame from user 298`
+
+Interpretation:
+- the producer thread has zero source-side slack
+- while two frames are in transmit, the app cannot prepare a third
+- so the builder waits for frame recycling every frame, and epoch drops accumulate over time
+- this also explains why the monotonic PTP cursor keeps falling multiple frames behind wall clock
+
+### Applied fix (2026-03-25, source-side pipeline depth)
+
+Updated RxTxApp ST20 pipeline TX to use **4** framebuffers instead of 2 in
+[tests/tools/RxTxApp/src/tx_st20p_app.c](tests/tools/RxTxApp/src/tx_st20p_app.c).
+
+Goal:
+- allow the producer to prepare the next frame while up to two frames are still downstream
+- eliminate constant `no ready frame from user` stalls
+- reduce or eliminate epoch drops before further LT tuning
+
+### Result of source-side depth increase (gpt5)
+
+This change produced a **real improvement**, but also revealed the next precise flaw:
+
+- `ring_peak` grew to ~`15960/15960`
+- pcap improved dramatically:
+  - `TRO avg ≈ 4.51ms` instead of 28ms/16ms-class failures
+  - `VRX` improved to `-151` / `-1004`
+  - frames 1..20 are phase-stable within about `±1us`
+- but there is still a single `+6.63ms` phase step at frame 21, and then the stream stays shifted
+
+Most important discovery from the log:
+- `start_tai 1774457582467901952`
+- `ptp_cursor 1774457581101235328`
+- difference = **1.366666624s = exactly 41 frame times**
+
+This proves the monotonic TSN PTP cursor was accumulating roughly **one frame of lag per historical epoch drop**.
+Pure monotonic stepping avoided large wire-time gaps, but every epoch drop left the PTP/RTP cursor one frame behind wall clock forever.
+After enough drops, the cursor inevitably fell back into past-LT territory again.
+
+### Applied fix (2026-03-25, bounded monotonic catch-up servo)
+
+Implemented in [lib/src/st2110/st_tx_video_session.c](lib/src/st2110/st_tx_video_session.c):
+
+- TSN monotonic `ptp_time_cursor` still advances frame-by-frame
+- but now each frame compares the monotonic cursor against the current epoch-derived target
+  `start_time_tai + lt_bias_ns`
+- when the monotonic cursor is behind, it adds a bounded catch-up correction
+  (currently capped at `500us` per frame)
+
+Goal:
+- preserve smooth TSN wire timing
+- prevent epoch drops from accumulating permanent whole-frame PTP/RTP lag
+- pull LaunchTime/RTP back toward wall clock gradually instead of by a single 33ms jump
+
+New validation hook:
+- epoch-drop log now includes `ptp_lag` in microseconds
+
+What to check next:
+- `ptp_lag` should shrink over time instead of staying at multi-frame values
+- `time_to_tx` should move toward zero / future
+- `lt_pkts future` should become non-zero and increase
+- pcap should keep the good early-frame stability while removing the `+6.63ms` step
+- `packet_ts_vs_rtp_ts` should fall sharply if RTP/LaunchTime realign to wall clock
+
+### Result of bounded monotonic catch-up servo (gpt6) — FAILED, REMOVED
+
+This solution made the stream **worse** and has been removed from code.
+
+Observed failures:
+- `fps` fell to **29.299929**
+- `epoch drop` increased to **6** per 10s window
+- `drift` exploded to **+727081ns/frame**
+- `ptp_lag` did **not** shrink; it grew from `259166us` to `311833us`
+- `lt_pkts future` stayed **0**
+- `inter_frame_rtp_ts_delta` in pcap became **3045** ticks instead of **3000**
+
+Interpretation:
+- the servo changed the monotonic PTP cursor step away from exact frame_time
+- RTP timestamps are derived from that cursor in the default path, so RTP cadence became wrong
+- this violated a hard invariant: RTP frame-to-frame delta must remain exact even while experimenting with LaunchTime correction
+
+Action taken:
+- removed the bounded catch-up servo from `st_tx_video_session.c`
+- kept `ptp_lag` only as a **diagnostic**
+
+Workflow note:
+- per user instruction, failed fixes should not remain active after validation
+- current code no longer contains the tested catch-up servo
+
+### New hypothesis set after gpt6 (subagent-assisted)
+
+I explicitly screened for **new** ideas that are materially different from already tested ones.
+Shortlist is recorded in:
+- [.github/workspace/tsn_post_gpt6_hypotheses.md](.github/workspace/tsn_post_gpt6_hypotheses.md)
+
+Most promising selected hypothesis:
+
+**LaunchTime and RTP need separate clocks.**
+
+Evidence:
+- SW ring is no longer the first bottleneck.
+- `tx_partial` remains very high.
+- E830 txtime field wraps every ~67.1ms.
+- With large SW ring + large TXQ, packets can sit downstream long enough to reach hardware already past LT.
+
+This is distinct from earlier fixes:
+- not TSC-gating each bulk
+- not builder throttling
+- not another pure LT bias change
+- not another RTP/epoch workaround
+
+### Applied fix (2026-03-25, TSN NIC submission horizon) — REJECTED AFTER GPT7
+
+Implemented in:
+- [lib/src/st2110/st_video_transmitter.c](lib/src/st2110/st_video_transmitter.c)
+- [lib/src/st2110/st_header.h](lib/src/st2110/st_header.h)
+- [lib/src/st2110/st_tx_video_session.c](lib/src/st2110/st_tx_video_session.c)
+
+Outcome from gpt7:
+- `tx_wait_lt=0`, `wait_max=0us`
+- `lt_pkts future=0(0.0%) past=1226322(100.0%)`
+- hypothesis was effectively a no-op on this workload
+- experiment removed from code after validation
+
+Conclusion:
+- do not retry the NIC submission horizon idea unless a future workload shows non-zero `tx_wait_lt`
+- next distinct fix must preserve exact RTP cadence while allowing LT-only correction
+
+### Applied fix (2026-03-25, separate TSN RTP clock + LT-only correction)
+
+Implemented in:
+- [lib/src/st2110/st_header.h](lib/src/st2110/st_header.h)
+- [lib/src/st2110/st_tx_video_session.c](lib/src/st2110/st_tx_video_session.c)
+
+Behavior:
+- TSN keeps an exact frame-to-frame RTP progression separate from the LaunchTime cursor.
+- RTP advances by exact media-clock frame ticks using integer+Bresenham accumulation.
+- TSN LaunchTime may now use bounded positive frame-boundary catch-up without perturbing RTP cadence.
+- Epoch-path RTP still derives from exact epoch time; only the default TSN non-epoch path changed.
+
+What to check next:
+- `inter_frame_rtp_ts_delta` must stay exactly `3000`
+- `ptp_lag` should stop growing without reintroducing RTP drift
+- `lt_pkts future` should become non-zero if LT-only catch-up helps
+- pcap should avoid the late-run `+6.63ms` phase step
+- `VRX` / `packet_ts_vs_rtp_ts` should improve materially
+
+### Result of separate TSN RTP clock + LT-only correction (gpt8) — PARTIAL RTP SUCCESS, LT SERVO FAILED
+
+What improved:
+- `inter_frame_rtp_ts_delta` stayed exact at `3000`
+- so the dedicated TSN RTP clock did its job and should stay
+
+What failed:
+- `fps` fell to **29.399976**
+- `epoch drop` increased to **7** per 10s window
+- `drift` rose to **+726346ns/frame**
+- `lt_pkts future` stayed **0%**
+- `ptp_lag` remained huge and still grew (`~9.61s -> 9.68s` in the shown logs)
+- pcap frame-start cadence became **~33.833ms/frame** after startup, with one later
+  **40.466ms** gap causing a permanent extra **+7.13ms** phase step
+
+Interpretation:
+- decoupling RTP from LT was the correct architectural step for RTP cadence only
+- but the LT-only bounded positive catch-up still changed the LT frame step away from exact
+  `frame_time`
+- that directly slowed wire cadence by about **+500us/frame**, matching the pcap and log fps
+
+Action taken:
+- remove the LT-only catch-up servo from code
+- keep the separate exact TSN RTP clock
+
+New strongest bottleneck signal from gpt8:
+- `busy as no ready frame from user 294`
+- `4 frames are in trans, total 4`
+- `ring_peak=16120/16120` with `4115` packets/frame means the SW ring alone can hold about
+  **3.9 frames**
+- therefore `framebuff_cnt=4` is still mathematically too small for this workload once TXQ
+  backpressure is included
+
+Next distinct fix:
+- increase RxTxApp ST20 pipeline TX depth again (target **8** framebuffers)
+- this is not another pacing servo; it addresses frame ownership starvation now that gpt8 proved
+  all 4 current framebuffers can be retained downstream simultaneously
+
+### New finding after deeper RxTxApp TX depth
+
+Increasing RxTxApp ST20 TX depth to `8` fixed the producer starvation symptom:
+- no more `busy as no ready frame from user`
+- `5 frames are in trans, total 8`
+- pipeline queue now shows slack: `C:3 T:5`
+
+But the transport log still shows the remaining root cause clearly:
+- `epoch drop 2`
+- `drift ptp_avg +223043ns/frame`
+- `lt_pkts future=0(0.0%)`
+- `ptp_lag` grows from `166666us` to `266666us`
+
+Interpretation:
+- source-side depth was necessary, but not sufficient
+- the monotonic LT cursor is still accumulating exactly one extra frame of lag per epoch drop
+- now that RTP is decoupled, the next distinct log-focused experiment is to keep exact per-frame
+  LT stepping normally, but **re-anchor LT to the epoch-derived target only on epoch-drop
+  boundaries**
+
+Why this is distinct from failed servos:
+- not per-frame catch-up
+- does not alter normal frame-to-frame LT cadence
+- only removes the permanent one-frame LT debt introduced by each recovery drop
+
+Expected log improvements:
+- `ptp_lag` should stop increasing by ~`33333us` per epoch drop
+- `lt_pkts future` should become non-zero if accumulated LT debt was the blocker
+- `time_to_tx max` should stay positive without reintroducing the gpt8 `29.4fps` regression
+
+### Result of epoch-drop-only LT re-anchor (2026-03-26 morning)
+
+This experiment fixed the old LT-debt accumulation cleanly:
+- epoch-drop log now shows `ptp_lag 0us`
+- long-run `fps` returned to the older baseline (`29.899873`)
+- `drift` returned to the older baseline too (`+109294ns/frame`)
+
+But the key TSN failure remains:
+- `epoch drop 1`
+- `ttx_bands future=144 ... past=154`
+- `lt_pkts future=0(0.0%) past=1230497(100.0%)`
+- `ring_peak=16352/16352`, `ring_stop=113018483`, `tx_partial=76544`
+- queue depth still sits at `C:3 T:5`
+
+## TSN vs RL comparison — strongest current root cause hypothesis
+
+Good RL baseline on the same workload shows:
+- `fps 29.999889`
+- `epoch drop 0`
+- `time_to_tx min 3547us max 7263us`
+- `drift ptp_avg +227ns/frame`
+- `ttx_bands future=299 past=0`
+- queue depth only `C:6 T:2`
+
+### Most likely remaining TSN root cause
+
+The remaining TSN/RL gap is now best explained by **downstream residency/backpressure in the
+TSN packet path**:
+
+- frame-start `time_to_tx` is often positive in TSN, so frames begin with real future margin
+- but by the time packets reach the transmitter, **all** packet LaunchTimes are already past
+  (`lt_pkts future=0%`)
+- therefore the future margin is being **consumed downstream** between `tv_sync_pacing()` and
+  actual NIC submission
+
+### Why this fits the logs
+
+- `time_to_tx` is a **frame-start** measurement
+- `lt_pkts future/past` is a **packet-at-transmitter-submission** measurement
+- the apparent contradiction is exactly what a too-deep queue/residency problem looks like
+- `ring_peak` at the max, enormous `ring_stop`, and high `tx_partial` all point to combined
+  `SW ring + NIC TXQ` backlog, not timestamp math
+- `frame_overhead avg=34us` remains tiny, so the dominant problem is no longer frame callback or
+  producer latency
+
+### Current best next distinct experiment
+
+Do a **pure buffering-depth sweep** for TSN while keeping the current logic unchanged:
+- keep exact TSN RTP clock
+- keep epoch-drop-only LT re-anchor
+- keep `framebuff_cnt=8`
+- sweep **downstream queue depth** (especially `nb_tx_desc`, and if needed the TSN SW-ring target)
+
+Success signal to look for:
+- `lt_pkts future` becomes non-zero
+- `T` moves down toward the RL baseline (`2` instead of `5`)
+- `ring_peak`/`ring_stop`/`tx_partial` reduce materially
+- `epoch drop` disappears without reintroducing LT debt
+
+### NEW finding (2026-03-25, after first work-conserving patch)
+The first TSN work-conserving validation exposed a **configuration/initialization bug**:
+
+- Log showed: `tsn_loops ... ring_peak=480/480 ... tx_partial=76591`
+- This strongly indicates the TSN SW ring was still effectively **~512 entries**, not 16384.
+- Root cause found in code: `s->ring_count` was sized for TSN using `s->pacing_way[...]`
+  **before `s->pacing_way[...]` was initialized** in `st_tx_video_session.c`.
+- So the previous run did **not** actually test the intended large-ring TSN design.
+
+**Implication**: The hypothesis "work-conserving loops are insufficient" was premature.
+The run was bottlenecked by a ring init bug, so it must be re-tested after the fix.
+
 ### czwartek21 results (epoch drop suppression — CATASTROPHIC FAILURE)
 **Epoch drop suppression does NOT work.** Builder lag grows unboundedly.
 ```
@@ -402,10 +841,13 @@ All metrics should be stable: CINST narrow, VRX=[5,6,7,8], TRO=const.
 
 ## Code State
 - **VRX compensation**: `pacing->vrx -= (s->bulk - 1)` → distribution [5,6,7,8] — OPTIMAL
-- **LaunchTime bias**: `pacing->lt_bias_ns = frame_time` for TSN mode
+- **LaunchTime bias**: `pacing->lt_bias_ns = 2 * frame_time` for TSN mode in current code
 - **Monotonic PTP cursor**: `tsn_ptp_cursor_base` advances by Bresenham frame_time, independent of epoch
 - **Epoch drops**: happen normally (snap forward), provide builder recovery
-- **RTP timestamp**: non-epoch path derives from `ptp_time_cursor` (monotonic, includes bias)
+- **RTP timestamp**: TSN non-epoch path now uses a dedicated exact RTP frame-tick accumulator
 - **Epoch-path RTP bias**: REVERTED (was wrong approach from czwartek19)
+- **Catch-up servo**: REMOVED again after gpt8; exact TSN RTP clock kept, no LT servo active
+- **LT resync experiment**: active only on epoch-drop boundaries; exact LT frame_time stepping remains between drops
+- **NIC submission horizon**: REMOVED after gpt7 proved it was a no-op (`tx_wait_lt=0`)
 - **Overhead instrumentation**: frame_overhead avg/max, notify/getframe/sync breakdown — ACTIVE
 - **Diagnostic logging**: EPOCH DROP PACING, ttx_bands, lt_pkts, time_to_tx, drift, overhead — ACTIVE
