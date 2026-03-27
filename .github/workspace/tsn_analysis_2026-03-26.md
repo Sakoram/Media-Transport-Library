@@ -1,473 +1,282 @@
-# TSN Pacing Analysis - 2026-03-26
-
-## Scope
-
-This note summarizes the current TSN pacing state for the `RxTxApp --pacing_way tsn` path using:
-
-- current workspace code
-- local diff versus `origin/main`
-- existing `.github/workspace` TSN notes
-- local DPDK tree at `script/dpdk-25.11`
-- capture/compliance artifacts:
-  - `/home/labrat/mkasiew/dumps/mypcap-high.pcap`
-  - `/home/labrat/mkasiew/dumps/mypcap-high.json`
-- user logs from RL and TSN runs
-
-## What TSN Is In This Repo
-
-In this codebase, TSN pacing means:
-
-- software builds RTP packets ahead of time
-- software stamps each packet with a PTP LaunchTime
-- the E830 NIC sends each packet at that programmed time using `RTE_ETH_TX_OFFLOAD_SEND_ON_TIMESTAMP`
-
-Practical consequence:
-
-- software should be work-conserving and submit packets early
-- the NIC should do the fine packet spacing
-- LaunchTimes must still be in the future when packets reach the NIC
-
-If LaunchTimes are already in the past at submission time, TSN stops behaving like true hardware pacing and the stream becomes non-compliant even if RTP timestamps remain mathematically correct.
-
-## What TSN Should Achieve
-
-For ST 2110-21 narrow/gapped transmission, the TSN path should:
-
-- keep packet departure spacing inside the narrow traffic envelope
-- keep the virtual receiver buffer inside the allowed window
-- avoid frame-period gaps caused by recovery logic
-- preserve exact media clock progression across frames
-
-From the current analyzer output for `mypcap-high.json`:
-
-- `inter_frame_rtp_ts_delta`: compliant, always `3000`
-- `2110_21_cinst`: not compliant
-- `2110_21_vrx`: not compliant
-- `narrow_streams`: `0`
-- `not_compliant_streams`: `1`
-
-So the current TSN implementation is already keeping frame-to-frame RTP cadence exact, but it is still failing the actual ST 2110-21 wire-timing checks.
-
-## Repo State Relevant To TSN
-
-Current local repository state:
-
-- branch: `main`
-- ahead of `origin/main`: `4` commits
-- additional unstaged local edits are present
-
-Files carrying the TSN work are mainly:
-
-- `.github/copilot-docs/mtl-knowledge-base.md`
-- `lib/src/dev/mt_dev.c`
-- `lib/src/st2110/st_header.h`
-- `lib/src/st2110/st_tx_video_session.c`
-- `lib/src/st2110/st_video_transmitter.c`
-- `lib/src/st2110/pipeline/st20_pipeline_tx.c`
-- `tests/tools/RxTxApp/src/tx_st20p_app.c`
-
-This matters because the repo already contains several iterations of TSN fixes. The current problem is not an untouched baseline; it is the remainder after multiple reasonable attempts.
-
-## What Is Already Implemented
-
-The current TSN path already contains these important changes:
-
-1. `mt_dev.c` enables `RTE_ETH_TX_OFFLOAD_SEND_ON_TIMESTAMP` when the interface reports the feature.
-2. `st_tx_video_session.c` sizes the TSN software ring after `pacing_way` is resolved, avoiding the old init-order bug.
-3. TSN uses a larger software ring, roughly `2 * total_pkts + 512`, rounded to power-of-two.
-4. TSN uses `lt_bias_ns = 2 * frame_time` to keep LaunchTimes forward-shifted.
-5. TSN uses integer/Bresenham 128 ns packet stepping for `ptp_time_cursor` instead of raw `uint64_t += double` on the packet path.
-6. TSN keeps a separate exact RTP frame clock so inter-frame RTP deltas stay exact even if LaunchTime handling changes.
-7. TSN re-anchors LaunchTime on epoch drops only, instead of trying to servo it every frame.
-8. TSN builder and TSN transmitter are both work-conserving up to `32` bulks per call.
-9. RxTxApp ST20P TX now uses `framebuff_cnt = 8` and `ST20P_TX_FLAG_BLOCK_GET`.
-
-For the current RxTxApp workload, this means:
-
-- callback-decoupling is no longer the main story
-- source-side framebuffer starvation has already been mitigated once
-- exact RTP progression has already been fixed
-
-## What The Good RL Log Shows
-
-The RL log is a useful control sample:
-
-- `fps 29.999962`
-- `epoch drop 0`
-- `time_to_tx min 0us max 7273us`
-- `drift ptp_avg +123ns tsc_avg +95ns per frame`
-- `ttx_bands future=297 borderline=2 past=0`
-- `framebuffer queue: C:7 T:1`
-
-Interpretation:
-
-- frames are reaching transmit with positive headroom
-- packets are not spending long downstream before actual wire send
-- only a small number of frames are resident in transmit at once
-
-## What The Current TSN Log Shows
-
-The failing TSN log shows:
-
-- `epoch drop 1`
-- `time_to_tx min -31102us max 29490us`
-- `drift ptp_avg +109297ns tsc_avg +109250ns per frame`
-- `ttx_bands future=144 borderline=0 past=154`
-- `lt_pkts future=0(0.0%) past=1230497(100.0%)`
-- `tsn_loops build_avg=4.01 build_max=32 tx_avg=5.01 tx_max=32 ring_peak=16352/16352 ring_stop=113037788 tx_partial=76518`
-- `framebuffer queue: C:3 T:5`
-
-Interpretation:
-
-1. Frame start is not always late.
-   The `time_to_tx` max is strongly positive.
-
-2. Packet submission is still effectively late.
-   Even when frame start is future, `lt_pkts future=0%` means that by the time packets are handed to the NIC, their LaunchTimes are already behind wall clock.
-
-3. Downstream residency is very deep.
-   The software ring is hitting its ceiling and partial TX is frequent.
-
-4. Too many frames remain in transmit.
-   RL sits around `T:1..2`, but TSN sits at `T:5` in the bad sample.
-
-5. Epoch drops are a symptom of backlog recovery, not the root problem.
-   They happen because the builder eventually misses the next frame slot.
-
-## What The Capture Says
-
-`mypcap-high.json` confirms the stream is still not compliant:
-
-- `video_streams = 1`
-- `narrow_streams = 0`
-- `not_compliant_streams = 1`
-- `packet_count = 120000`
-- `frame_count = 30`
-- `packets_per_frame = 4115`
-- `inter_frame_rtp_ts_delta = 3000` and compliant
-- `2110_21_cinst = not_compliant`
-- `2110_21_vrx = not_compliant`
-
-Important nuance:
-
-- `packet_ts_vs_rtp_ts` is also marked not compliant, but that metric is less useful here without a trusted phase-offset interpretation.
-- The stronger evidence is that RTP frame cadence is already correct while Cinst and VRX are still failing.
-
-That combination points to a transmission-timing problem, not a media-clock problem.
-
-## DPDK And E830 Constraints That Matter
-
-From the local DPDK tree:
-
-- ICE LaunchTime uses a special TS queue on E830
-- the driver writes `(txtime % 1e9) >> 7`
-- LaunchTime resolution is `128 ns`
-- the descriptor stores a `19-bit` timestamp field
-- `19-bit * 128 ns = 67.1 ms` representable window per wrap
-
-Relevant implications:
-
-1. LaunchTime is quantized by hardware at 128 ns.
-2. Anything that assumes nanosecond-exact launch without alignment is wrong.
-3. A TSN lead close to two frame times at 1080p30 is already very near the hardware timestamp window.
-4. If the path also buffers about one frame of packet span downstream, the safety margin gets uncomfortably small.
-
-This does not prove that the current `2 * frame_time` bias is the immediate bug, but it is a real hardware constraint that should stay in scope.
-
-## Root Cause Assessment
-
-### Primary Root Cause: Downstream Residency Eats The Future Margin
-
-This is the strongest current explanation.
-
-Evidence:
-
-- `time_to_tx` at frame start is often positive
-- `lt_pkts future=0%` at actual NIC submission time
-- TSN ring reaches `16352/16352`
-- `ring_stop` is huge
-- `tx_partial` is huge
-- more frames are stuck in transmit than under RL
-
-Meaning:
-
-- `tv_sync_pacing()` is not the main failing point anymore
-- the future margin is being consumed between frame sync and actual descriptor submission
-- the dominant queue is the combined `SW ring + NIC TXQ + partial retry` path
-
-### Secondary Root Cause: TSN Lead Is Too Close To The E830 Timestamp Window
-
-Current code biases LaunchTime by about two frame times.
-
-At 1080p30:
-
-- one frame is about `33.33 ms`
-- two frames are about `66.67 ms`
-- the hardware timestamp field wraps at about `67.1 ms`
-
-That leaves almost no representable headroom.
-
-This is probably not the first bug to fix, but it is too close to ignore. Once queue depth is reduced, this should be re-validated instead of assumed safe.
-
-### Secondary Risk: Partial TX Retries Can Age LaunchTimes Further
-
-`video_trs_launch_time_tasklet()` stamps LaunchTime before burst.
-
-If `tx_burst` is partial:
-
-- remaining packets are moved into `trs_inflight[]`
-- retry happens later
-- the LaunchTime itself is not refreshed
-
-That behavior is not automatically wrong, but with frequent partial TX it can amplify the past-LT problem. It needs direct instrumentation before changing logic.
-
-## What Is Probably Not Worth Re-trying First
-
-These ideas already look exhausted for this workload:
-
-1. Epoch-drop suppression.
-   It removes the only recovery mechanism and causes unbounded lag.
-
-2. Per-frame LT catch-up servo.
-   It already damaged cadence in prior experiments.
-
-3. Callback-decoupling as the main RxTxApp fix.
-   RxTxApp ST20P TX is already using blocking `get_frame` with `framebuff_cnt = 8`.
-
-4. More RTP timestamp work.
-   The capture already shows exact `3000` ticks per frame.
-
-## Recommended Next Steps
-
-## Current Patch Under Test
-
-Applied in this workspace before the next validation run:
-
-- `lib/src/st2110/st_tx_video_session.c`
-- TSN software ring target reduced from about `2 frames + 512` to about `1 frame + 512`
-- rationale: reduce downstream residency so packets reach the NIC with positive LaunchTime lead more often
-- non-goal: this patch does not change RTP cadence logic, epoch-drop policy, or LT re-anchor behavior
-
-Results from the first validation sweep:
-
-- `--nb_tx_desc 128`
-   - `lt_pkts future` improved sharply versus the old baseline and even reached `100%` early in the run
-   - but steady state still drifted back toward mixed future/past LT and repeated epoch drops
-   - analyzer result: still `not_compliant` for `2110_21_cinst` and `2110_21_vrx`
-- `--nb_tx_desc 256`
-   - first clear improvement: `2110_21_cinst` became compliant
-   - `2110_21_vrx` still failed
-   - `packet_ts_vs_rtp_ts` still failed badly
-   - capture summary showed a stable narrow burst shape but wrong absolute phase (`avg_tro_ns ~17.86ms` vs `tro_default_ns ~1.27ms`)
-
-Conclusion from that sweep:
-
-- queue residency was a real blocker and reducing it helped materially
-- but the remaining failure after `nb_tx_desc=256` is no longer mainly burst-shape
-- the next strongest hypothesis is TSN RTP absolute phase misalignment: exact `3000`-tick frame deltas are preserved, but the TSN exact RTP clock was seeded from `ptp_time_cursor`, which includes `TR_offset`
-
-Second patch now applied before the next validation run:
-
-- keep the exact TSN RTP accumulator
-- change its seed from `ptp_time_cursor` to `epoch + lt_bias_ns`
-- rationale: preserve exact inter-frame RTP cadence while omitting `TR_offset` from RTP phase, matching the `ST20_TX_FLAG_RTP_TIMESTAMP_EPOCH` semantics and the compliant historical captures where `avg_tro_ns` stayed close to `tro_default_ns`
-
-Result from `tsn-256-rtpfix`:
-
-- `2110_21_cinst`: still compliant
-- `2110_21_vrx`: still not compliant
-- `packet_ts_vs_rtp_ts`: still not compliant
-- but the constant phase error improved again:
-   - `avg_tro_ns` moved from about `17.86ms` to about `8.32ms`
-   - the local pcap analysis showed zero bad frames and stable per-frame timing after the truncated first frame
-
-Interpretation:
-
-- the stream shape is now narrow-compliant at the packet-burst level
-- the remaining failure is a mostly constant phase lag, not burst disorder
-- this lag is consistent with residual steady-state LT debt accumulating between epoch drops
-
-Third patch now applied before the next validation run:
-
-- reduce TSN SW ring target again, from about `1 frame + margin` to about `0.5 frame + margin`
-- rationale: the first ring reduction approximately halved the constant TRO error class (`~17.86ms -> ~8.32ms`) while keeping CINST compliant at `--nb_tx_desc 256`; the next step is to reduce steady-state downstream residency further without changing RTP or epoch logic again
-
-Expected success signals from the next run:
-
-- `lt_pkts future` becomes non-zero
-- `ring_peak` drops materially below the old TSN ceiling
-- `ring_stop` and `tx_partial` decrease
-- `T` frames in transmit drops toward the RL baseline
-- `2110_21_cinst` stays compliant at `--nb_tx_desc 256`
-- `2110_21_vrx` improves further, ideally to compliant
-- `packet_ts_vs_rtp_ts` falls from the current `~8.32ms` TRO class error toward the historical compliant `~1.2ms` class
-
-## Latest Validated State
-
-Subsequent validation runs changed the conclusion above.
-
-What is now validated:
-
-- the smaller TSN ring mattered more than any RTP change
-- the `4096`-class TSN ring was the first configuration that restored healthy steady-state transport behavior
-- the later LaunchTime-derived RTP re-anchor experiment was a regression and should not be reused as the default next step
-
-Key recent checkpoints:
-
-1. `tsn-256-revert5`
-    - TSN ring: `4096`
-    - `epoch drop 0`
-    - steady-state `lt_pkts future = 99.3%`
-    - queue depth dropped to about `C:6 T:2`
-    - local pcap looked clean after the truncated first frame
-    - analyzer still failed `packet_ts_vs_rtp_ts` with a large stable offset around `134.572ms`
-
-2. `tsn-256-revert6`
-    - changed TSN RTP anchoring to frame LaunchTime-derived TAI
-    - this was worse, not better
-    - local pcap showed a clear `+6.632ms` phase step and later burst behavior
-    - analyzer regressed badly (`avg_tro_ns ~22.5ms`)
-
-3. `tsn-256-revert7`
-    - backed out the failed `revert6` RTP logic
-    - logs returned to the healthy `revert5` transport regime:
-       - TSN ring `4096`
-       - no visible epoch drops
-       - steady-state `lt_pkts future` back up to `99.3%`
-       - queue depth near `C:6 T:2`
-    - but the run was still not fully clean:
-       - local pcap showed one isolated event around frames `15-16`
-       - frame 15 stretched to about `36.142ms`
-       - frame 16 compressed to about `29.169ms`
-       - one intra-frame gap reached about `6.887ms`, followed by immediate burst clusters
-    - analyzer result:
-       - `2110_21_cinst`: not compliant
-       - `2110_21_vrx`: not compliant
-       - `packet_ts_vs_rtp_ts`: still around `134.721ms`
-
-4. `tsn-256-revert8`
-   - kept the `revert5`/`revert7` transport shape and temporarily added targeted TSN instrumentation:
-       - `tsn_deq`
-       - `tsn_retry`
-       - `tsn_frame_outlier`
-    - logs stayed in the healthy shallow-queue regime:
-       - `time_to_tx min 2957us .. 4514us max 33201us .. 33202us`
-       - `ttx_bands future=298 borderline=0 past=0`
-       - `lt_pkts future=99.3% past=0.7%`
-       - framebuffer queue stayed near `C:6 T:2`
-    - dequeue instrumentation showed packets were usually still far in the future when they left the SW ring:
-       - `tsn_deq lead avg ~ +24.2ms .. +25.0ms`
-       - `ring_age avg ~33.276ms`
-       - occasional `lead min ~ -3.3ms .. -4.8ms`
-    - retry instrumentation showed many partial retries, but not dominant retry aging:
-       - `partial ~1.5M`, `gate ~151k`
-       - `wait_avg ~103us .. 107us`
-       - `lead avg ~ +17.0ms .. +18.6ms`
-    - local pcap returned to a clean wire pattern after the truncated first frame:
-       - no bad frames
-       - no burst clusters
-       - per-frame durations back near `31.992ms .. 31.993ms`
-    - analyzer result:
-       - `2110_21_cinst`: compliant
-       - `2110_21_vrx`: not compliant
-       - `packet_ts_vs_rtp_ts`: stable around `124.722ms`
-       - `avg_tro_ns`: stable around `24.722ms`
-       - `vrx histogram`: `[-3015, 100]`
-
-Interpretation:
-
-- `revert7` is much closer to `revert5` than to `revert6`, but `revert8` is the more important checkpoint now because it removed the visible burst event again
-- the old deep-residency failure mode is no longer the dominant explanation on this path
-- `revert8` shows that dequeue age and partial retries are not the active blocker in the healthy `4096`-ring regime: packets usually still reach dequeue and retry with large positive LaunchTime lead
-- the remaining failure is now a stable absolute phase mismatch between wire time and the analyzer's RTP/VRX reference, not a globally bursty transport shape
-
-## Current Minimal Fix In Code
-
-The current branch now takes the smallest phase-correction step that still matches the evidence:
-
-- keep the healthy `4096` TSN ring and one-frame LaunchTime bias
-- keep the exact TSN RTP frame-step logic
-- do not derive RTP from LaunchTime / `ptp_time_cursor`
-- re-seed the TSN RTP stepper when `cur_epochs` is non-consecutive, so startup or epoch-drop frame slips do not become permanent RTP phase errors
-
-At the same time, the temporary `tsn_deq` / `tsn_retry` / `tsn_frame_outlier` instrumentation used for `revert8` diagnosis has been removed again to keep the runtime diff smaller.
-
-So the next TSN step should preserve the current transport path and target absolute TSN phase alignment directly, for example by checking:
-
-- how the current TSN RTP anchor relates to `TR_offset`, `VRX`, and `transmission_start_time()`
-- whether the analyzer-visible `packet_ts_vs_rtp_ts ~124.7ms` offset is an integer frame-count phase error plus a fixed TRO term
-- whether current TSN seeding is preserving exact cadence but using the wrong absolute epoch for RTP/VRX conformance
-
-It should not reopen the LaunchTime-derived RTP re-anchor idea without new evidence.
-
-### Step 1: Run A Pure Queue-Depth Sweep
-
-Do this without changing timestamp math.
-
-Variables to sweep:
-
-- `nb_tx_desc`: try `128`, `256`, `512`, `1024`
-- TSN SW ring target: try smaller than current `~2 frames + 512` target
-
-Goal:
-
-- find the point where `lt_pkts future` becomes non-zero
-- reduce `tx_partial`
-- reduce `ring_peak`
-- reduce `ring_stop`
-- reduce `T` frames in transmit
-- eliminate epoch drops without touching RTP/LT arithmetic
-
-Reason:
-
-- the current evidence points to excessive residency, not incorrect frame-start calculation
-
-### Step 2: Instrument Submission Age Directly
-
-Add narrow diagnostics in the TSN transmitter for:
-
-- `target_ptp - cur_ptp` at dequeue time
-- `target_ptp - cur_ptp` on retry of inflight packets
-- first-packet and last-packet lead per bulk
-- age of packets that undergo partial TX retry
-
-This will tell you whether the real loss happens:
-
-- before dequeue from SW ring
-- during NIC backpressure
-- during retry handling
-
-### Step 3: Re-check Bias Against Hardware Window
-
-Only after Step 1.
-
-If smaller queue depth still leaves packets past LT, re-check whether `lt_bias_ns = 2 * frame_time` is too close to the E830 representable horizon.
-
-Directionally, safer options are:
-
-- a smaller bias
-- or explicit wrap-aware validation
-
-But this should be a second-stage change, not mixed into the queue-depth sweep.
-
-### Step 4: Only Then Revisit Epoch Arithmetic
-
-If the queue sweep produces future LT packets and compliance improves, but rare epoch drops remain, then revisit:
-
-- `calc_frame_count_since_epoch()` precision
-- any remaining `double` epoch math on large absolute timestamps
-
-That is a correctness cleanup step, not the first-order throughput fix.
-
-## Working Conclusion
-
-The current TSN implementation is no longer failing because of RTP cadence, framebuffer depth, or deep downstream residency in the healthy `4096`-ring configuration.
-
-The strongest remaining issue after `revert8` is this:
-
-- software now computes a sensible future schedule at frame start
-- packets usually still reach dequeue and retry with positive LaunchTime lead
-- local wire timing is narrow-shaped and `2110_21_cinst` is compliant again
-- but the stream still carries a large constant `VRX` / `packet_ts_vs_rtp_ts` phase offset
-
-So the next serious TSN experiment should be a phase-alignment experiment that keeps the current transport path intact, not another residency sweep and not another LaunchTime-derived RTP re-anchor.
+# TSN State - 2026-03-26
+
+## Goal
+
+Make `RxTxApp --config_file ./config/tx_1v.json --ptp --pacing_way tsn --nb_tx_desc 256`
+fully ST 2110-21 compliant on E830 while keeping the diff close to `origin/main`.
+
+## Current Code Intentionally Kept
+
+- TSN ring sizing after `pacing_way` init, current target `4096`
+- one-frame `lt_bias_ns`
+- RxTxApp `framebuff_cnt = 8`
+- exact TSN RTP stepper
+- RTP stepper resync when `cur_epochs` is non-consecutive
+
+Current built candidate:
+
+- `revert10` tested TSN exact RTP seed from `transmission_start_time()` instead of raw frame epoch
+- result: reject this idea and keep the `revert9` RTP seed model
+- reason: it reintroduced a clean `+6.633ms` phase step around frame 5 while transport stayed healthy
+
+Removed again:
+
+- temporary dequeue / retry / outlier TSN instrumentation
+- unrelated pipeline wakeup tweaks
+- LaunchTime-derived RTP re-anchor logic
+
+## Best Checkpoints
+
+### `revert5`
+
+- first healthy transport baseline
+- local pcap clean
+- queue near `C:6 T:2`
+- `lt_pkts future ~99.3%`
+- analyzer still failed with stable phase error:
+  - `packet_ts_vs_rtp_ts ~134.57ms`
+  - `avg_tro_ns ~1.24ms`
+
+### `revert8`
+
+- transport still clean
+- `2110_21_cinst = compliant`
+- analyzer stable phase error:
+  - `packet_ts_vs_rtp_ts ~124.72ms`
+  - `avg_tro_ns ~24.72ms`
+
+### `revert9`
+
+- transport still healthy:
+  - `time_to_tx` mostly positive
+  - `lt_pkts future ~99.3%`
+  - queue still `C:6 T:2`
+  - local pcap still clean
+- `2110_21_cinst = compliant`
+- `inter_frame_rtp_ts_delta = 3000`
+- RTP resync fix reduced the old large phase error:
+  - `packet_ts_vs_rtp_ts ~14.00ms`
+  - `avg_tro_ns ~14.00ms`
+- `2110_21_vrx` still fails
+
+### `revert10`
+
+- transport still mostly healthy:
+  - `time_to_tx` stayed positive
+  - steady-state `lt_pkts future ~99.3%`
+  - `2110_21_cinst = compliant`
+  - `inter_frame_rtp_ts_delta = 3000`
+- analyzer average improved, but stability regressed:
+  - `packet_ts_vs_rtp_ts avg ~6.96ms`, range `~1.72ms .. 8.35ms`
+  - `avg_tro_ns ~8.19ms`, range `~2.95ms .. 9.59ms`
+- local pcap showed the real regression more clearly:
+  - clean frames 1-4 near `TRO ~0us`
+  - then one `~7.974ms` inter-frame gap at frame 5
+  - frames 5+ stayed on a shifted plateau near `TRO ~6.633ms`
+- conclusion: seeding TSN RTP from `transmission_start_time()` is not viable on this path
+
+### `revert11`
+
+- built after backing out the `revert10` RTP-seed experiment
+- transport returned to a clean wire shape:
+  - local pcap clean after the truncated startup frame
+  - no phase step, no burst, inter-frame gap stayed `~1341-1342us`
+  - local frame TRO stayed near `0us`
+- analyzer moved to a new fixed plateau instead of returning to `revert9`:
+  - `packet_ts_vs_rtp_ts ~21.729ms` with very tight range
+  - `avg_tro_ns ~21.729ms` with very tight range
+  - `2110_21_cinst = compliant`
+  - `2110_21_vrx = not_compliant`
+  - VRX histogram collapsed to a single bucket near `-2630`
+- conclusion: the active problem remains a clean but startup-dependent absolute TSN phase / TRO offset on an otherwise healthy wire
+
+### `revert12`
+
+- same code path as `revert11`, but with startup-only TSN trace logs enabled
+- startup trace for frames 0-5 was clean and consecutive:
+  - no `late_advance`
+  - TSN RTP seeded once, then stepped by exact `3000`
+  - packet-0 LaunchTime stayed about one frame in the future (`delta_ptp_ns ~33.33ms`)
+  - packet-0 software send stayed only `~0.3-4.6us` after target TSC
+- analyzer improved sharply versus `revert9`/`revert11`:
+  - `avg_tro_ns ~2.048ms`
+  - `packet_ts_vs_rtp_ts avg ~3.715ms`
+  - but still not compliant because of a late outlier (`packet_ts_vs_rtp_ts max ~43.33ms`, `inter_frame_rtp_ts_delta max 6000`)
+- local pcap clarified the failure mode:
+  - frames 1-16 stayed clean at `TRO ~0us`
+  - then a late discontinuity appeared around frames 17-19
+  - frame 17 had a `~35.49ms` max internal gap
+  - frame 18 jumped to `TRO ~42.09ms`
+  - frame 19 then followed with `dRTP = 6000` and a `~1us` inter-frame gap
+- conclusion: `revert12` did not select the bad startup plateau in its first traced frames; the active defect in this run is a later one-off frame / RTP discontinuity, not the original constant startup plateau
+
+### `revert13`
+
+- extended trace to 40 startup frames, plus frame-done / last-packet / frame-boundary timing
+- analyzer result shifted again:
+  - `2110_21_cinst = compliant`
+  - `inter_frame_rtp_ts_delta = 3000` exact
+  - `avg_tro_ns ~10.57ms`
+  - `packet_ts_vs_rtp_ts avg ~10.57ms`
+  - `2110_21_vrx = not_compliant`
+- local pcap showed a very specific wire pattern:
+  - frame 1 starts clean near `TRO ~0us`
+  - frame 6 adds `+6.633ms` from one `~7.974ms` frame-boundary gap
+  - frames 6-35 stay flat near `TRO ~6.633ms`
+  - frame 36 adds another `+6.633ms` from the same `~7.974ms` boundary gap
+  - frames 36+ stay flat near `TRO ~13.266ms`
+- traced software targets for frames 0-39 stayed normal throughout:
+  - no `late_advance`
+  - no RTP resync beyond the first init inside the traced window
+  - `gap_rtp = 3000` always
+  - target frame-boundary gaps stayed `~1.341ms`
+  - packet-0 submit stayed about `33.33ms` before LaunchTime
+- conclusion: the observed `+6.633ms` wire steps are not created by the traced builder / epoch / RTP schedule itself; they occur downstream of the planned frame-boundary targets
+
+### `revert14`
+
+- same instrumentation as `revert13`, plus continuous post-startup boundary-anomaly logging
+- local pcap moved the first clean-to-shifted transition later:
+  - frame 1-28 stayed clean near `TRO ~0us`
+  - frame 29 added `+6.633ms` from one `~7.974ms` frame-boundary gap
+  - frames 29-58 stayed flat near `TRO ~6.633ms`
+  - frame 59 added another `+6.633ms` from the same `~7.974ms` boundary gap
+- the key software trace change happened earlier than the first wire step:
+  - packet-0 submit margin was still healthy at frame 25 (`delta_ptp_ns ~9.11ms`)
+  - from frame 26 onward it collapsed to about `2.4-2.8ms`
+  - `tv_sync_pacing()` still reported the frame itself being scheduled about `9.0ms` ahead at frame 26, so the lost headroom is consumed after sync and before packet-0 submit
+- the new `TSN BOUNDARY ANOMALY[...]` logs did fire, but this comparison is not causal:
+  - even in healthy frames, actual previous-last-submit to next-packet-0-submit spacing is only `~10-20us`, not the target `~1.341ms`
+  - reason: packet-0 is always submitted much earlier relative to its LaunchTime than the previous frame's last packet
+  - treat this specific boundary-gap comparison as a false-positive diagnostic, not proof of the failure point
+- conclusion: `revert14` shifts the leading suspect from NIC-only LaunchTime realization to a software-side headroom collapse in the builder/transmitter path before packet-0 submit; the useful next signal is continuous packet submit headroom, not raw submit-gap mismatch
+
+### `revert15`
+
+- important test-method correction from the user:
+  - packet capture starts only after about `20s` from app start so PTP is already stable
+  - therefore the original `TSN STARTUP ...` frame-0..39 logs are not the right correlation point for the pcap/json artifacts
+- analyzer and local pcap both improved sharply:
+  - analyzer: `avg_tro_ns ~1.327ms`, `packet_ts_vs_rtp_ts avg ~1.327ms`, exact `dRTP=3000`, `cinst=compliant`
+  - local pcap: frames 1-58 stay essentially clean near `TRO ~0us`
+  - only a late small event remains near frame 59: one `~3.150ms` inter-frame gap and a plateau near `TRO ~1.795ms`
+- current early-trace logs still show a real mode switch around frame 32:
+  - `time_to_tx_ns` falls from `~9.8-10.0ms` to `~3.1-3.4ms`
+  - packet-0 submit headroom follows it down to `~3.3ms`
+  - but because this happens long before the user starts capture, it cannot be treated as the direct cause of the later pcap event
+- instrumentation correction applied after this note:
+  - keep startup traces for low-level debugging
+  - add a delayed `TSN STABLE ...` trace window after `20s` from the first TSN sync so logs line up with the user's capture method
+  - fix first-bulk enqueue tracing so frames whose first bulk briefly sat in builder inflight no longer show false `enqueue_* = 0`
+- conclusion: `revert15` is much closer to a real fix on the wire, but it still does not give enough correlated steady-state evidence to justify a transport behavior change. The next run should use the new delayed stable trace window before proposing a fix.
+
+### `revert16`
+
+- local pcap regressed hard again even with the delayed trace build:
+  - frames 1-28 stayed clean near `TRO ~0us`
+  - frame 29 added the familiar `+6.633ms` step from one `~7.974ms` boundary gap
+  - frame 31 then showed `dRTP = 6000` and the run fell onto a shifted plateau near `TRO ~-32.333ms`
+  - the same `dRTP = 6000` pattern repeated again at frame 40
+- delayed `TSN STABLE ...` traces did capture the pre-failure mode switch, even though the window still ended a few seconds before the actual packet capture:
+  - stable frames 0-32 were healthy: `time_to_tx_ns ~33.2ms`, `sync_to_deq ~31.85ms`, packet-0 submit gap `~1.35ms`
+  - at stable frame 33 the path changed abruptly:
+    - previous frame last-packet submit was about `4.9ms` late on the TSC schedule
+    - next frame first dequeue was delayed by the same amount (`enqueue_to_deq` jumped from `~31.83ms` to `~36.74ms`)
+    - packet-0 submit gap collapsed from `~1.35ms` to only `~15us`
+    - `time_to_tx_ns` dropped from `~33.2ms` to `~29.6ms`
+    - builder enqueue stayed cheap (`~8-105us`), so the lost time is not in `tv_sync_pacing()` or the first enqueue path
+- the strongest new correlation is in the later log window that overlaps the pcap failure:
+  - `tv_update_tsn_rtp_time_stamp()` logged real non-consecutive epoch recovery at `16:15:10` (`51300 -> 51302`, then `51310 -> 51312`)
+  - those exact RTP resyncs line up with the pcap frames where `dRTP = 6000`
+- conclusion:
+  - `revert16` is not a pure RTP-anchor regression; the wire failure now correlates with actual epoch skips
+  - the active lag is still downstream of enqueue and before/deuring first dequeue and packet submit, with the TSN transmitter / inflight / backpressure path burning about `4.9ms` of TSC margin before the epoch-drop recovery becomes visible on the wire
+  - this is enough to design a targeted pacing/transmitter fix candidate; more logs are only needed if that first fix attempt fails
+
+Current trace build after `revert14` now adds one tighter per-frame TSN path:
+
+- store per-frame timestamps at sync completion
+- log first-bulk enqueue timing (`TSN STARTUP ENQ[...]`)
+- log first-bulk dequeue timing (`TSN STARTUP DEQ[...]`)
+- replace the noisy post-startup boundary-gap check with `TSN HEADROOM ANOMALY[...]` when packet-0 LaunchTime headroom drops below `5ms`
+- anomaly logs now include sync→enqueue, enqueue→dequeue, and dequeue→submit spans so the next run can say whether the missing `~6ms` is spent in builder work, transmitter scheduling, or just before burst submission
+- add stable-window `TSN MODE[...]` transition logs keyed on the `revert16` flip signals:
+  - first-dequeue headroom relative to `sync_time_to_tx_ns`
+  - previous-frame `TX_LAST` lateness
+  - packet-0 submit-gap collapse
+- add periodic `tsn_mode[port]` summaries so the next run shows whether the lagging state is a single transition or a persistent regime
+
+## Current Interpretation
+
+Solved:
+
+- deep-residency / all-past-LT failure mode
+- burst-collapse is not the active `revert9` issue
+- permanent multi-frame RTP phase slip was mostly removed by RTP resync
+
+Remaining issue:
+
+- fixed transmit-phase / TRO error of about `14ms`
+- `revert10` disproved the `transmission_start_time()` TSN RTP seed: it reduced the average
+  analyzer offset but reintroduced the classic clean phase-step pattern, so the next fix should
+  return to the `revert9` baseline and target actual transmit phase instead of RTP reseeding
+- `revert11` strengthens that conclusion: even with a clean wire and no phase step, the analyzer can
+  still land on a different constant plateau (`~21.7ms` instead of `~14.0ms`), so the remaining bug
+  looks like startup-dependent absolute TSN phase selection, not RTP cadence or burst collapse
+- `revert12` narrows that again: the first traced startup frames were healthy and near-zero TRO on the
+  local wire, so at least this run's failure is dominated by a later one-off frame discontinuity
+  (`~35.5ms` internal gap, then `TRO ~42ms`, then `dRTP=6000`) rather than by initial phase selection
+- `revert13` strengthens the downstream hypothesis: in the traced 40-frame window, software frame
+  targets and RTP cadence stayed exact while the wire still showed repeated `+6.633ms` frame-start
+  slips. That points to late packet-0 submission or NIC-side LaunchTime realization, not a wrong
+  epoch/RTP decision in the logged builder path
+- `revert14` narrows that split again: the frame schedule is still exact, but packet-0 submit
+  headroom collapses from about `9.1ms` to `2.5-2.8ms` around frame 26, a few frames before the
+  first `+6.633ms` wire step. That strongly suggests the slip is created in software between
+  `tv_sync_pacing()` and packet-0 submission, not purely inside NIC LaunchTime execution
+
+## Next Direction
+
+Keep the current transport shape and inspect the fixed phase between:
+
+- `transmission_start_time()`
+- `vrx` / `tr_offset`
+- `lt_bias_ns`
+- `tsc_time_cursor`
+- `ptp_time_cursor`
+
+Current tree now adds startup-only TSN trace logs for the first few frames at:
+
+- `tv_init_pacing_epoch()`
+- `tv_sync_pacing()`
+- `tv_update_tsn_rtp_time_stamp()`
+- `tv_tasklet_frame()`
+- first packet-0 send in `video_trs_burst()`
+
+Current tree also extends that trace window to the first `40` TSN frames and now logs:
+
+- frame build completion in `tv_tasklet_frame()`
+- last-packet transmit for each traced frame in `video_trs_burst()`
+- packet-0 frame-boundary deltas versus the previous frame's last packet
+- any later TSN RTP resync after initialization, even if it happens beyond the normal trace window
+
+Likely next instrumentation extension:
+
+- keep the startup logs
+- stop relying on the current planned-gap vs submit-gap anomaly check; it naturally fires even on
+  healthy frames because first-packet and last-packet submit lead times differ by about the full
+  boundary gap
+- instead, keep continuous per-frame headroom logs for:
+  - packet-0 `delta_ptp_ns` / `delta_tsc_ns`
+  - previous-frame last-packet `delta_ptp_ns` / `delta_tsc_ns`
+  - a trigger when packet-0 headroom drops by multiple milliseconds versus the steady startup level
+- use the new ENQ/DEQ/SUBMIT breakdown first before changing transport behavior; this should be the shortest path to a root-cause fix
+- because the user captures only after PTP settles, prefer the delayed `TSN STABLE ...` window over the startup window when correlating with pcap/json results
+
+Validation bar for the next change:
+
+- clean local pcap
+- `2110_21_cinst = compliant`
+- `inter_frame_rtp_ts_delta = 3000`
+- no burst / gap regression
+- lower `packet_ts_vs_rtp_ts` and `avg_tro_ns`

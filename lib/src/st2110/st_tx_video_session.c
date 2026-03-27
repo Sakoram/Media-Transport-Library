@@ -539,26 +539,6 @@ static int tv_init_pacing(struct mtl_main_impl* impl,
   /* default VRX compensate as rl accuracy, update later in tv_train_pacing */
   pacing->pad_interval = s->st20_total_pkts;
 
-  /* With the TSN ring reduced to about one frame plus margin, restore a single
-   * frame of LaunchTime lead so packets can still reach the NIC in the future
-   * without pushing close to the E830 ~67ms txtime horizon. */
-  pacing->lt_bias_ns = 0;
-  if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) {
-    pacing->lt_bias_ns = (uint64_t)frame_time;
-    uint32_t nb_tx_desc = mt_if_nb_tx_desc(impl, MTL_PORT_P);
-    uint32_t lead_pkts = (uint32_t)(pacing->lt_bias_ns / pacing->trs) + 1;
-    uint32_t queue_have = s->ring_count + nb_tx_desc;
-    if (queue_have < lead_pkts) {
-      warn("%s[%02d], TSN lt_bias queue budget low: need about %u pkts, have %u "
-           "(sw_ring %u + txq %u)\n",
-           __func__, idx, lead_pkts, queue_have, s->ring_count, nb_tx_desc);
-    }
-    info("%s[%02d], TSN LaunchTime bias: %" PRIu64 "ns (%.2f frames, %.2fms), "
-         "queue budget have=%u (sw_ring %u + txq %u)\n",
-         __func__, idx, pacing->lt_bias_ns, pacing->lt_bias_ns / frame_time,
-         pacing->lt_bias_ns / 1e6, queue_have, s->ring_count, nb_tx_desc);
-  }
-
   /* E830 NIC LaunchTime quantizes timestamps to 128ns. Enable ptp_time_cursor
    * alignment for TSN pacing to prevent cumulative truncation error. */
   pacing->ptp_cursor_128ns_align =
@@ -580,17 +560,6 @@ static int tv_init_pacing(struct mtl_main_impl* impl,
         pacing->trs_128ns_ticks_base * 128, pacing->trs_128ns_ticks_extra,
         pacing->trs_128ns_total_pkts, total_ticks,
         (double)(total_ticks * 128) / 1e6);
-
-    uint64_t rtp_ticks_x_den = (uint64_t)s->fps_tm.sampling_clock_rate * s->fps_tm.den;
-    pacing->tsn_rtp_frame_ticks_int = (uint32_t)(rtp_ticks_x_den / s->fps_tm.mul);
-    pacing->tsn_rtp_frame_ticks_extra = (uint32_t)(rtp_ticks_x_den % s->fps_tm.mul);
-    pacing->tsn_rtp_frame_ticks_denom = s->fps_tm.mul;
-    pacing->tsn_rtp_init = false;
-    pacing->tsn_rtp_frame_accum = 0;
-    pacing->tsn_rtp_last_epoch = 0;
-    info("%s[%02d], TSN exact RTP ticks: int=%u extra=%u/%u\n", __func__, idx,
-       pacing->tsn_rtp_frame_ticks_int, pacing->tsn_rtp_frame_ticks_extra,
-       pacing->tsn_rtp_frame_ticks_denom);
   }
 
   info("%s[%02d], pacing params: trs=%.4f frame_time=%.2f tr_offset=%.2f\n"
@@ -698,6 +667,14 @@ static int tv_init_pacing_epoch(struct mtl_main_impl* impl,
   uint64_t ptp_time = mt_get_ptp_time(impl, MTL_PORT_P);
   struct st_tx_video_pacing* pacing = &s->pacing;
   pacing->cur_epochs = ptp_time / pacing->frame_time;
+  if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
+      !s->stat_tsn_startup_init_logged) {
+    notice("%s(%d), TSN STARTUP INIT: ptp=%" PRIu64 " cur_epoch=%" PRIu64
+           " frame_time=%.2f tr_offset=%.2f vrx=%u\n",
+           __func__, s->idx, ptp_time, pacing->cur_epochs, pacing->frame_time,
+           pacing->tr_offset, pacing->vrx);
+    s->stat_tsn_startup_init_logged = true;
+  }
   return 0;
 }
 
@@ -773,9 +750,13 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
   uint64_t cur_tai = mt_get_ptp_time(impl, MTL_PORT_P);
   uint64_t cur_tsc = mt_get_tsc(impl);
   uint64_t start_time_tai;
+  uint64_t init_epoch = pacing->cur_epochs;
+  uint64_t calc_epoch;
+  bool late_advance = false;
   int64_t time_to_tx_ns;
 
   pacing->cur_epochs = calc_frame_count_since_epoch(s, cur_tai, required_tai);
+  calc_epoch = pacing->cur_epochs;
 
   if (s->ops.flags & ST20_TX_FLAG_EXACT_USER_PACING) {
     start_time_tai = required_tai;
@@ -794,6 +775,7 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
    * this branch does not fire. */
   if (pacing->ptp_cursor_128ns_align && time_to_tx_ns <= 0) {
     pacing->cur_epochs++;
+    late_advance = true;
     start_time_tai = transmission_start_time(pacing, pacing->cur_epochs);
     time_to_tx_ns = start_time_tai - cur_tai;
   }
@@ -811,7 +793,7 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
 
   pacing->tsc_time_frame_start = pacing->tsc_time_cursor;
 
-  pacing->ptp_time_cursor = start_time_tai + pacing->lt_bias_ns;
+  pacing->ptp_time_cursor = start_time_tai;
   if (pacing->ptp_cursor_128ns_align) {
     pacing->ptp_time_cursor = ((pacing->ptp_time_cursor + 127) >> 7) << 7;
     pacing->trs_128ns_accum = 0;
@@ -867,6 +849,35 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
       __func__, s->idx, pacing->cur_epochs, start_time_tai,
       pacing->ptp_time_cursor, pacing->tsc_time_cursor, time_to_tx_ns, pacing->trs);
 
+  if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
+      (s->stat_tsn_startup_sync_logs < ST_TSN_STARTUP_TRACE_FRAMES)) {
+    notice("%s(%d), TSN STARTUP SYNC[%u]: init_epoch=%" PRIu64
+           " calc_epoch=%" PRIu64 " final_epoch=%" PRIu64
+           " late_advance=%d required_tai=%" PRIu64
+           " cur_tai=%" PRIu64 " start_tai=%" PRIu64
+           " time_to_tx_ns=%" PRId64 " ptp_cursor=%" PRIu64
+           " tsc_cursor=%" PRIu64 "\n",
+           __func__, s->idx, s->stat_tsn_startup_sync_logs, init_epoch, calc_epoch,
+           pacing->cur_epochs, late_advance, required_tai, cur_tai, start_time_tai,
+           time_to_tx_ns, pacing->ptp_time_cursor, pacing->tsc_time_cursor);
+    s->stat_tsn_startup_sync_logs++;
+  } else if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
+             ((s->stat_tsn_trace_anchor_ptp == 0) ||
+              (cur_tai >=
+               (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS))) &&
+             (s->stat_tsn_stable_sync_logs < ST_TSN_STARTUP_TRACE_FRAMES)) {
+    notice("%s(%d), TSN STABLE SYNC[%u]: init_epoch=%" PRIu64
+           " calc_epoch=%" PRIu64 " final_epoch=%" PRIu64
+           " late_advance=%d required_tai=%" PRIu64
+           " cur_tai=%" PRIu64 " start_tai=%" PRIu64
+           " time_to_tx_ns=%" PRId64 " ptp_cursor=%" PRIu64
+           " tsc_cursor=%" PRIu64 "\n",
+           __func__, s->idx, s->stat_tsn_stable_sync_logs, init_epoch, calc_epoch,
+           pacing->cur_epochs, late_advance, required_tai, cur_tai, start_time_tai,
+           time_to_tx_ns, pacing->ptp_time_cursor, pacing->tsc_time_cursor);
+    s->stat_tsn_stable_sync_logs++;
+  }
+
   return 0;
 }
 
@@ -880,27 +891,63 @@ static int tv_sync_pacing_st22(struct mtl_main_impl* impl,
   return tv_sync_pacing(impl, s, required_tai);
 }
 
-static inline void tv_update_tsn_rtp_time_stamp(struct st_tx_video_session_impl* s,
-                                                uint64_t tai_for_seed) {
-  struct st_tx_video_pacing* pacing = &s->pacing;
+static void tv_tsn_record_enqueue(struct mtl_main_impl* impl,
+                                  struct st_tx_video_session_impl* s,
+                                  enum mtl_session_port port, struct rte_mbuf* pkt,
+                                  struct rte_ring* ring) {
+  struct st_frame_trans* frame;
+  uint64_t cur_ptp;
+  uint64_t cur_tsc;
+  bool trace_stable;
+  uint64_t frame_epoch;
 
-  if (!pacing->tsn_rtp_init || (pacing->cur_epochs != (pacing->tsn_rtp_last_epoch + 1))) {
-    pacing->rtp_time_stamp =
-        st10_tai_to_media_clk(tai_for_seed, s->fps_tm.sampling_clock_rate);
-    pacing->tsn_rtp_init = true;
-    pacing->tsn_rtp_frame_accum = 0;
-    pacing->tsn_rtp_last_epoch = pacing->cur_epochs;
-    return;
-  }
+  if (s->pacing_way[MTL_SESSION_PORT_P] != ST21_TX_PACING_WAY_TSN) return;
+  if (st_tx_mbuf_get_idx(pkt) != 0) return;
 
-  uint32_t step = pacing->tsn_rtp_frame_ticks_int;
-  pacing->tsn_rtp_frame_accum += pacing->tsn_rtp_frame_ticks_extra;
-  if (pacing->tsn_rtp_frame_accum >= pacing->tsn_rtp_frame_ticks_denom) {
-    step++;
-    pacing->tsn_rtp_frame_accum -= pacing->tsn_rtp_frame_ticks_denom;
+  frame = st_tx_mbuf_get_priv(pkt);
+  if (!frame || frame->tsn_debug.first_enqueue_valid[port]) return;
+
+  cur_ptp = mt_get_ptp_time(impl, mt_port_logic2phy(s->port_maps, port));
+  cur_tsc = mt_get_tsc(impl);
+  frame->tsn_debug.first_enqueue_tsc[port] = cur_tsc;
+  frame->tsn_debug.first_enqueue_ptp[port] = cur_ptp;
+  frame->tsn_debug.first_enqueue_valid[port] = true;
+
+  if (s->st22_info)
+    frame_epoch = frame->tx_st22_meta.epoch;
+  else
+    frame_epoch = frame->tv_meta.epoch;
+
+  if (s->stat_tsn_trace_anchor_ptp == 0) s->stat_tsn_trace_anchor_ptp = cur_ptp;
+  trace_stable =
+      (cur_ptp >= (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS)) &&
+      (s->stat_tsn_stable_enqueue_logs[port] < ST_TSN_STARTUP_TRACE_FRAMES);
+
+  if (s->stat_tsn_startup_enqueue_logs[port] < ST_TSN_STARTUP_TRACE_FRAMES) {
+    notice("%s(%d), TSN STARTUP ENQ[%u]: frame_idx=%u epoch=%" PRIu64
+           " sync_to_enq_ptp_ns=%" PRIu64 " sync_to_enq_tsc_ns=%" PRIu64
+           " delta_ptp_ns=%" PRId64 " delta_tsc_ns=%" PRId64
+           " ring_count=%u\n",
+           __func__, s->idx, s->stat_tsn_startup_enqueue_logs[port], frame->idx,
+           frame_epoch, cur_ptp - frame->tsn_debug.sync_ptp,
+           cur_tsc - frame->tsn_debug.sync_tsc,
+           (int64_t)st_tx_mbuf_get_ptp(pkt) - (int64_t)cur_ptp,
+           (int64_t)st_tx_mbuf_get_tsc(pkt) - (int64_t)cur_tsc,
+           rte_ring_count(ring));
+    s->stat_tsn_startup_enqueue_logs[port]++;
+  } else if (trace_stable) {
+    notice("%s(%d), TSN STABLE ENQ[%u]: frame_idx=%u epoch=%" PRIu64
+           " sync_to_enq_ptp_ns=%" PRIu64 " sync_to_enq_tsc_ns=%" PRIu64
+           " delta_ptp_ns=%" PRId64 " delta_tsc_ns=%" PRId64
+           " ring_count=%u\n",
+           __func__, s->idx, s->stat_tsn_stable_enqueue_logs[port], frame->idx,
+           frame_epoch, cur_ptp - frame->tsn_debug.sync_ptp,
+           cur_tsc - frame->tsn_debug.sync_tsc,
+           (int64_t)st_tx_mbuf_get_ptp(pkt) - (int64_t)cur_ptp,
+           (int64_t)st_tx_mbuf_get_tsc(pkt) - (int64_t)cur_tsc,
+           rte_ring_count(ring));
+    s->stat_tsn_stable_enqueue_logs[port]++;
   }
-  pacing->rtp_time_stamp += step;
-  pacing->tsn_rtp_last_epoch = pacing->cur_epochs;
 }
 
 static void tv_update_rtp_time_stamp(struct st_tx_video_session_impl* s,
@@ -914,21 +961,15 @@ static void tv_update_rtp_time_stamp(struct st_tx_video_session_impl* s,
     pacing->rtp_time_stamp =
         st10_get_media_clk(tfmt_for_clk, timestamp, s->fps_tm.sampling_clock_rate);
   } else {
+    uint64_t tai_for_rtp_ts;
     if (s->ops.flags & ST20_TX_FLAG_RTP_TIMESTAMP_EPOCH) {
-      uint64_t tai_for_rtp_ts = tai_from_frame_count(pacing, pacing->cur_epochs);
-      tai_for_rtp_ts += delta_ns;
-      pacing->rtp_time_stamp =
-          st10_tai_to_media_clk(tai_for_rtp_ts, s->fps_tm.sampling_clock_rate);
-    } else if (pacing->ptp_cursor_128ns_align) {
-      uint64_t tai_for_rtp_ts = tai_from_frame_count(pacing, pacing->cur_epochs);
-      tai_for_rtp_ts += delta_ns;
-      tv_update_tsn_rtp_time_stamp(s, tai_for_rtp_ts);
+      tai_for_rtp_ts = tai_from_frame_count(pacing, pacing->cur_epochs);
     } else {
-      uint64_t tai_for_rtp_ts = pacing->ptp_time_cursor;
-      tai_for_rtp_ts += delta_ns;
-      pacing->rtp_time_stamp =
-          st10_tai_to_media_clk(tai_for_rtp_ts, s->fps_tm.sampling_clock_rate);
+      tai_for_rtp_ts = pacing->ptp_time_cursor;
     }
+    tai_for_rtp_ts += delta_ns;
+    pacing->rtp_time_stamp =
+        st10_tai_to_media_clk(tai_for_rtp_ts, s->fps_tm.sampling_clock_rate);
   }
   dbg("%s(%d), rtp time stamp %u\n", __func__, s->idx, pacing->rtp_time_stamp);
 }
@@ -1541,21 +1582,16 @@ static int tv_build_rtp(struct mtl_main_impl* impl, struct st_tx_video_session_i
     if (s->ops.flags & ST20_TX_FLAG_USER_TIMESTAMP) {
       s->pacing.rtp_time_stamp = ntohl(rtp->tmstamp);
     } else {
+      uint64_t tai_for_rtp_ts;
+
       if (s->ops.flags & ST20_TX_FLAG_RTP_TIMESTAMP_EPOCH) {
-        uint64_t tai_for_rtp_ts = tai_from_frame_count(&s->pacing, s->pacing.cur_epochs);
-        tai_for_rtp_ts += (uint64_t)s->ops.rtp_timestamp_delta_us * NS_PER_US;
-        s->pacing.rtp_time_stamp =
-            st10_tai_to_media_clk(tai_for_rtp_ts, s->fps_tm.sampling_clock_rate);
-      } else if (s->pacing.ptp_cursor_128ns_align) {
-        uint64_t tai_for_rtp_ts = tai_from_frame_count(&s->pacing, s->pacing.cur_epochs);
-        tai_for_rtp_ts += (uint64_t)s->ops.rtp_timestamp_delta_us * NS_PER_US;
-        tv_update_tsn_rtp_time_stamp(s, tai_for_rtp_ts);
+        tai_for_rtp_ts = tai_from_frame_count(&s->pacing, s->pacing.cur_epochs);
       } else {
-        uint64_t tai_for_rtp_ts = s->pacing.ptp_time_cursor;
-        tai_for_rtp_ts += (uint64_t)s->ops.rtp_timestamp_delta_us * NS_PER_US;
-        s->pacing.rtp_time_stamp =
-            st10_tai_to_media_clk(tai_for_rtp_ts, s->fps_tm.sampling_clock_rate);
+        tai_for_rtp_ts = s->pacing.ptp_time_cursor;
       }
+      tai_for_rtp_ts += (uint64_t)s->ops.rtp_timestamp_delta_us * NS_PER_US;
+      s->pacing.rtp_time_stamp =
+          st10_tai_to_media_clk(tai_for_rtp_ts, s->fps_tm.sampling_clock_rate);
     }
     dbg("%s(%d), rtp time stamp %u\n", __func__, s->idx, s->pacing.rtp_time_stamp);
   }
@@ -1620,21 +1656,16 @@ static int tv_build_rtp_chain(struct mtl_main_impl* impl,
     if (s->ops.flags & ST20_TX_FLAG_USER_TIMESTAMP) {
       s->pacing.rtp_time_stamp = ntohl(rtp->tmstamp);
     } else {
+      uint64_t tai_for_rtp_ts;
+
       if (s->ops.flags & ST20_TX_FLAG_RTP_TIMESTAMP_EPOCH) {
-        uint64_t tai_for_rtp_ts = tai_from_frame_count(&s->pacing, s->pacing.cur_epochs);
-        tai_for_rtp_ts += (uint64_t)s->ops.rtp_timestamp_delta_us * NS_PER_US;
-        s->pacing.rtp_time_stamp =
-            st10_tai_to_media_clk(tai_for_rtp_ts, s->fps_tm.sampling_clock_rate);
-      } else if (s->pacing.ptp_cursor_128ns_align) {
-        uint64_t tai_for_rtp_ts = tai_from_frame_count(&s->pacing, s->pacing.cur_epochs);
-        tai_for_rtp_ts += (uint64_t)s->ops.rtp_timestamp_delta_us * NS_PER_US;
-        tv_update_tsn_rtp_time_stamp(s, tai_for_rtp_ts);
+        tai_for_rtp_ts = tai_from_frame_count(&s->pacing, s->pacing.cur_epochs);
       } else {
-        uint64_t tai_for_rtp_ts = s->pacing.ptp_time_cursor;
-        tai_for_rtp_ts += (uint64_t)s->ops.rtp_timestamp_delta_us * NS_PER_US;
-        s->pacing.rtp_time_stamp =
-            st10_tai_to_media_clk(tai_for_rtp_ts, s->fps_tm.sampling_clock_rate);
+        tai_for_rtp_ts = s->pacing.ptp_time_cursor;
       }
+      tai_for_rtp_ts += (uint64_t)s->ops.rtp_timestamp_delta_us * NS_PER_US;
+      s->pacing.rtp_time_stamp =
+          st10_tai_to_media_clk(tai_for_rtp_ts, s->fps_tm.sampling_clock_rate);
     }
     dbg("%s(%d), rtp time stamp %u\n", __func__, s->idx, s->pacing.rtp_time_stamp);
   }
@@ -2026,6 +2057,8 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
     n = rte_ring_sp_enqueue_bulk(ring_p, (void**)&s->inflight[MTL_SESSION_PORT_P][0],
                                  bulk, NULL);
     if (n > 0) {
+      tv_tsn_record_enqueue(impl, s, MTL_SESSION_PORT_P,
+                            s->inflight[MTL_SESSION_PORT_P][0], ring_p);
       s->inflight[MTL_SESSION_PORT_P][0] = NULL;
     } else {
       s->stat_build_ret_code = -STI_FRAME_INFLIGHT_ENQUEUE_FAIL;
@@ -2038,6 +2071,8 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
     n = rte_ring_sp_enqueue_bulk(ring_r, (void**)&s->inflight[MTL_SESSION_PORT_R][0],
                                  bulk, NULL);
     if (n > 0) {
+      tv_tsn_record_enqueue(impl, s, MTL_SESSION_PORT_R,
+                            s->inflight[MTL_SESSION_PORT_R][0], ring_r);
       s->inflight[MTL_SESSION_PORT_R][0] = NULL;
     } else {
       s->stat_build_ret_code = -STI_FRAME_INFLIGHT_R_ENQUEUE_FAIL;
@@ -2139,6 +2174,41 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       frame->tv_meta.timestamp = pacing->ptp_time_cursor;
       frame->tv_meta.rtp_timestamp = pacing->rtp_time_stamp;
       frame->tv_meta.epoch = pacing->cur_epochs;
+      memset(&frame->tsn_debug, 0, sizeof(frame->tsn_debug));
+      if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) {
+        frame->tsn_debug.sync_ptp =
+            mt_get_ptp_time(impl, mt_port_logic2phy(s->port_maps, MTL_SESSION_PORT_P));
+        frame->tsn_debug.sync_tsc = mt_get_tsc(impl);
+        frame->tsn_debug.sync_time_to_tx_ns =
+            (int64_t)pacing->tsc_time_cursor - (int64_t)frame->tsn_debug.sync_tsc;
+        if (s->stat_tsn_trace_anchor_ptp == 0)
+          s->stat_tsn_trace_anchor_ptp = frame->tsn_debug.sync_ptp;
+      }
+      if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
+          (s->stat_tsn_startup_frame_logs < ST_TSN_STARTUP_TRACE_FRAMES)) {
+        notice("%s(%d), TSN STARTUP FRAME[%u]: frame_idx=%u"
+               " app_epoch=%" PRIu64 " app_tai=%" PRIu64
+               " required_tai=%" PRIu64 " sync_epoch=%" PRIu64
+               " sync_ptp=%" PRIu64 " sync_rtp=%u second_field=%d\n",
+               __func__, idx, s->stat_tsn_startup_frame_logs, next_frame_idx,
+               meta.epoch, meta.timestamp, required_tai, frame->tv_meta.epoch,
+               frame->tv_meta.timestamp, frame->tv_meta.rtp_timestamp,
+               frame->tv_meta.second_field);
+        s->stat_tsn_startup_frame_logs++;
+                } else if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
+                 (frame->tsn_debug.sync_ptp >=
+                  (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS)) &&
+                 (s->stat_tsn_stable_frame_logs < ST_TSN_STARTUP_TRACE_FRAMES)) {
+             notice("%s(%d), TSN STABLE FRAME[%u]: frame_idx=%u"
+               " app_epoch=%" PRIu64 " app_tai=%" PRIu64
+               " required_tai=%" PRIu64 " sync_epoch=%" PRIu64
+               " sync_ptp=%" PRIu64 " sync_rtp=%u second_field=%d\n",
+               __func__, idx, s->stat_tsn_stable_frame_logs, next_frame_idx,
+               meta.epoch, meta.timestamp, required_tai, frame->tv_meta.epoch,
+               frame->tv_meta.timestamp, frame->tv_meta.rtp_timestamp,
+               frame->tv_meta.second_field);
+             s->stat_tsn_stable_frame_logs++;
+      }
       dbg("%s(%d), frame %d start: ptp_cursor %" PRIu64 " (sub-sec %" PRIu64
           " >>7 %" PRIu64 ") rtp_ts %u epoch %" PRIu64 "\n",
           __func__, idx, next_frame_idx,
@@ -2277,6 +2347,9 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
     if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN)
       s->stat_tsn_build_ring_stop++;
     done = true;
+  } else if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
+             (st_tx_mbuf_get_idx(pkts[0]) == 0)) {
+    tv_tsn_record_enqueue(impl, s, MTL_SESSION_PORT_P, pkts[0], ring_p);
   }
   if (send_r) {
     n = rte_ring_sp_enqueue_bulk(ring_r, (void**)&pkts_r[0], bulk, NULL);
@@ -2288,13 +2361,70 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN)
         s->stat_tsn_build_ring_stop++;
       done = true;
+    } else if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
+               (st_tx_mbuf_get_idx(pkts_r[0]) == 0)) {
+      tv_tsn_record_enqueue(impl, s, MTL_SESSION_PORT_R, pkts_r[0], ring_r);
     }
   }
 
   if (s->st20_pkt_idx >= s->st20_total_pkts) {
+    struct st_frame_trans* frame_info = &s->st20_frames[s->st20_frame_idx];
     dbg("%s(%d), frame %d done: ptp_cursor %" PRIu64 " epoch %" PRIu64 "\n",
         __func__, idx, s->st20_frame_idx,
         (uint64_t)pacing->ptp_time_cursor, (uint64_t)pacing->cur_epochs);
+    if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
+        (s->stat_tsn_frame_done_logs < ST_TSN_STARTUP_TRACE_FRAMES)) {
+      uint64_t frame_epoch;
+      uint64_t frame_timestamp;
+      uint32_t frame_rtp;
+
+      if (s->st22_info) {
+        frame_epoch = frame_info->tx_st22_meta.epoch;
+        frame_timestamp = frame_info->tx_st22_meta.timestamp;
+        frame_rtp = frame_info->tx_st22_meta.rtp_timestamp;
+      } else {
+        frame_epoch = frame_info->tv_meta.epoch;
+        frame_timestamp = frame_info->tv_meta.timestamp;
+        frame_rtp = frame_info->tv_meta.rtp_timestamp;
+      }
+
+      notice("%s(%d), TSN STARTUP DONE[%u]: frame_idx=%u epoch=%" PRIu64
+             " frame_ptp=%" PRIu64 " frame_rtp=%u end_ptp=%" PRIu64
+             " end_tsc=%" PRIu64 " span_ptp_ns=%" PRIu64
+             " total_pkts=%d inflight=%d\n",
+             __func__, idx, s->stat_tsn_frame_done_logs, s->st20_frame_idx,
+             frame_epoch, frame_timestamp, frame_rtp, pacing->ptp_time_cursor,
+             pacing->tsc_time_cursor, pacing->ptp_time_cursor - frame_timestamp,
+             s->st20_total_pkts, s->trs_inflight_num[MTL_SESSION_PORT_P]);
+      s->stat_tsn_frame_done_logs++;
+    } else if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
+               (frame_info->tsn_debug.sync_ptp >=
+                (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS)) &&
+               (s->stat_tsn_stable_frame_done_logs < ST_TSN_STARTUP_TRACE_FRAMES)) {
+      uint64_t frame_epoch;
+      uint64_t frame_timestamp;
+      uint32_t frame_rtp;
+
+      if (s->st22_info) {
+        frame_epoch = frame_info->tx_st22_meta.epoch;
+        frame_timestamp = frame_info->tx_st22_meta.timestamp;
+        frame_rtp = frame_info->tx_st22_meta.rtp_timestamp;
+      } else {
+        frame_epoch = frame_info->tv_meta.epoch;
+        frame_timestamp = frame_info->tv_meta.timestamp;
+        frame_rtp = frame_info->tv_meta.rtp_timestamp;
+      }
+
+      notice("%s(%d), TSN STABLE DONE[%u]: frame_idx=%u epoch=%" PRIu64
+             " frame_ptp=%" PRIu64 " frame_rtp=%u end_ptp=%" PRIu64
+             " end_tsc=%" PRIu64 " span_ptp_ns=%" PRIu64
+             " total_pkts=%d inflight=%d\n",
+             __func__, idx, s->stat_tsn_stable_frame_done_logs, s->st20_frame_idx,
+             frame_epoch, frame_timestamp, frame_rtp, pacing->ptp_time_cursor,
+             pacing->tsc_time_cursor, pacing->ptp_time_cursor - frame_timestamp,
+             s->st20_total_pkts, s->trs_inflight_num[MTL_SESSION_PORT_P]);
+      s->stat_tsn_stable_frame_done_logs++;
+    }
     /* Record TSC at frame completion for overhead measurement */
     s->stat_frame_done_tsc = mt_get_tsc(impl);
     /* end of current frame */
@@ -3554,20 +3684,16 @@ static int tv_attach(struct mtl_main_impl* impl, struct st_tx_video_sessions_mgr
    * Before this point s->pacing_way[] is unset, which would silently leave TSN sessions
    * on the default 512-entry ring and force permanent backpressure.
    *
-   * With the reverted per-bulk TSN gating path, the old 2 * total_pkts ring again leaves
-   * roughly four frames resident in the SW queue on this workload. `revert2` and later runs
-   * showed that reducing the ring improved the dominant failure from wire instability to a
-   * mostly stable latency/phase problem, but `revert4` still sat at `ring_peak=8188/8188`.
-   * Reduce the TSN SW ring one more step to about half a frame plus margin so queue residency
-   * can fall again while keeping the current one-frame LT bias and TSN RTP seeding model. */
+   * For TSN LaunchTime pacing, the builder must run ahead of the transmitter so
+   * LaunchTime timestamps stay in the future when the NIC consumes descriptors. */
   s->ring_count = ST_TX_VIDEO_SESSIONS_RING_SIZE;
   if (s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) {
-    uint32_t min_ring = (uint32_t)s->st20_total_pkts / 2 + ST_TX_VIDEO_SESSIONS_RING_SIZE;
+    uint32_t min_ring = (uint32_t)s->st20_total_pkts * 2;
     uint32_t ring_po2 = 1;
     while (ring_po2 < min_ring) ring_po2 <<= 1;
     s->ring_count = ring_po2;
-    info("%s(%d), TSN ring %u (~0.5 frame + margin, target %u pkts, rounded to po2)\n",
-         __func__, idx, s->ring_count, min_ring);
+    info("%s(%d), TSN ring %u (2 * %d pkts, rounded to po2)\n", __func__, idx,
+         s->ring_count, s->st20_total_pkts);
   } else {
     while (s->ring_count > s->st20_total_pkts) {
       s->ring_count /= 2;
@@ -3641,6 +3767,9 @@ static int tv_attach(struct mtl_main_impl* impl, struct st_tx_video_sessions_mgr
     s->trs_pad_inflight_num[i] = 0;
     s->trs_target_tsc[i] = 0;
     s->last_burst_succ_time_tsc[i] = mt_get_tsc(impl);
+    s->stat_tsn_prev_last_delta_valid[i] = false;
+    s->stat_tsn_mode_lagging[i] = false;
+    s->stat_tsn_mode_diag_init[i] = false;
   }
 
   tv_init_pacing_epoch(impl, s);
@@ -3798,6 +3927,83 @@ static void tv_stat(struct st_tx_video_sessions_mgr* mgr,
         s->stat_tsn_tx_bulks_max = 0;
         s->stat_tsn_tx_ring_peak = 0;
         s->stat_tsn_tx_partial = 0;
+      }
+      for (int s_port = 0; s_port < s->ops.num_port; s_port++) {
+        if (!s->stat_tsn_tx_pass_calls[s_port] && !s->stat_tsn_tx_wait_target[s_port] &&
+            !s->stat_tsn_tx_retry_inflight[s_port] &&
+            !s->stat_tsn_tx_retry_inflight2[s_port] &&
+            !s->stat_tsn_tx_saved_future_pkts[s_port] &&
+            !s->stat_tsn_tx_saved_partial_pkts[s_port] &&
+            !s->stat_tsn_tx_pass_budget_hits[s_port] &&
+            !s->stat_tsn_tx_retry_cleanup[s_port] &&
+            !s->stat_tsn_tx_zero_progress[s_port])
+          continue;
+
+        uint64_t pass_avg_x100 =
+            s->stat_tsn_tx_pass_calls[s_port]
+                ? (100 * s->stat_tsn_tx_pass_sum[s_port]) /
+                      s->stat_tsn_tx_pass_calls[s_port]
+                : 0;
+
+         notice("TX_VIDEO_SESSION(%d,%d): tsn_txdiag[%d] pass_avg=%" PRIu64
+           ".%02" PRIu64 " pass_max=%u pass_budget=%u wait=%u inflight=%u"
+           " inflight2=%u cleanup=%u zero=%u deq_empty=%u split=%u"
+           " future_save=%" PRIu64 " partial_save=%" PRIu64
+           " inflight_peak=%u/%u\n",
+               m_idx, idx, s_port, pass_avg_x100 / 100, pass_avg_x100 % 100,
+               s->stat_tsn_tx_pass_max[s_port],
+               s->stat_tsn_tx_pass_budget_hits[s_port],
+               s->stat_tsn_tx_wait_target[s_port],
+               s->stat_tsn_tx_retry_inflight[s_port],
+               s->stat_tsn_tx_retry_inflight2[s_port],
+           s->stat_tsn_tx_retry_cleanup[s_port],
+           s->stat_tsn_tx_zero_progress[s_port],
+               s->stat_tsn_tx_dequeue_empty[s_port],
+               s->stat_tsn_tx_split_boundary[s_port],
+               s->stat_tsn_tx_saved_future_pkts[s_port],
+               s->stat_tsn_tx_saved_partial_pkts[s_port],
+               s->stat_tsn_tx_inflight_peak[s_port],
+               s->stat_tsn_tx_inflight2_peak[s_port]);
+
+        s->stat_tsn_tx_wait_target[s_port] = 0;
+        s->stat_tsn_tx_retry_inflight[s_port] = 0;
+        s->stat_tsn_tx_retry_inflight2[s_port] = 0;
+        s->stat_tsn_tx_dequeue_empty[s_port] = 0;
+        s->stat_tsn_tx_split_boundary[s_port] = 0;
+        s->stat_tsn_tx_saved_future_pkts[s_port] = 0;
+        s->stat_tsn_tx_saved_partial_pkts[s_port] = 0;
+        s->stat_tsn_tx_inflight_peak[s_port] = 0;
+        s->stat_tsn_tx_inflight2_peak[s_port] = 0;
+        s->stat_tsn_tx_retry_cleanup[s_port] = 0;
+        s->stat_tsn_tx_zero_progress[s_port] = 0;
+        s->stat_tsn_tx_pass_calls[s_port] = 0;
+        s->stat_tsn_tx_pass_sum[s_port] = 0;
+        s->stat_tsn_tx_pass_max[s_port] = 0;
+        s->stat_tsn_tx_pass_budget_hits[s_port] = 0;
+      }
+      for (int s_port = 0; s_port < s->ops.num_port; s_port++) {
+        if (!s->stat_tsn_mode_samples[s_port]) continue;
+
+        notice("TX_VIDEO_SESSION(%d,%d): tsn_mode[%d] samples=%u lag=%u enter=%u recover=%u state=%s min_deq_headroom=%+" PRId64
+               "us min_submit_headroom=%+" PRId64 "us min_submit_gap=%+" PRId64
+               "us min_prev_last=%+" PRId64 "us\n",
+               m_idx, idx, s_port, s->stat_tsn_mode_samples[s_port],
+               s->stat_tsn_mode_lag_samples[s_port], s->stat_tsn_mode_entries[s_port],
+               s->stat_tsn_mode_recoveries[s_port],
+               s->stat_tsn_mode_lagging[s_port] ? "lagging" : "healthy",
+               s->stat_tsn_mode_min_deq_headroom_ns[s_port] / 1000,
+               s->stat_tsn_mode_min_submit_headroom_ns[s_port] / 1000,
+               s->stat_tsn_mode_min_submit_gap_ns[s_port] / 1000,
+               s->stat_tsn_mode_min_prev_last_delta_ns[s_port] / 1000);
+        s->stat_tsn_mode_diag_init[s_port] = false;
+        s->stat_tsn_mode_samples[s_port] = 0;
+        s->stat_tsn_mode_lag_samples[s_port] = 0;
+        s->stat_tsn_mode_entries[s_port] = 0;
+        s->stat_tsn_mode_recoveries[s_port] = 0;
+        s->stat_tsn_mode_min_deq_headroom_ns[s_port] = 0;
+        s->stat_tsn_mode_min_submit_headroom_ns[s_port] = 0;
+        s->stat_tsn_mode_min_submit_gap_ns[s_port] = 0;
+        s->stat_tsn_mode_min_prev_last_delta_ns[s_port] = 0;
       }
     }
     s->stat_time_to_tx_init = false;
