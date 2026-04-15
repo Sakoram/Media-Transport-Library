@@ -554,19 +554,20 @@ static int tv_init_pacing(struct mtl_main_impl* impl,
         (uint32_t)(total_ticks -
                    (uint64_t)pacing->trs_128ns_ticks_base * s->st20_total_pkts);
     pacing->trs_128ns_accum = 0;
-    info("%s[%02d], TSN Bresenham pacing: base=%u ticks (%u ns), extra=%u/%u, "
+    info(
+        "%s[%02d], TSN Bresenham pacing: base=%u ticks (%u ns), extra=%u/%u, "
         "total_ticks=%" PRIu64 ", frame_span=%.3f ms\n",
-        __func__, idx, pacing->trs_128ns_ticks_base,
-        pacing->trs_128ns_ticks_base * 128, pacing->trs_128ns_ticks_extra,
-        pacing->trs_128ns_total_pkts, total_ticks,
+        __func__, idx, pacing->trs_128ns_ticks_base, pacing->trs_128ns_ticks_base * 128,
+        pacing->trs_128ns_ticks_extra, pacing->trs_128ns_total_pkts, total_ticks,
         (double)(total_ticks * 128) / 1e6);
   }
 
-  info("%s[%02d], pacing params: trs=%.4f frame_time=%.2f tr_offset=%.2f\n"
+  info(
+      "%s[%02d], pacing params: trs=%.4f frame_time=%.2f tr_offset=%.2f\n"
       "  reactive=%.6f vrx=%u total_pkts=%d frame_idle=%.2f\n"
       "  trs_floor128=%u trs_ceil128=%u NIC_frame_span=%.3fms ideal_frame_span=%.3fms\n",
-      __func__, idx, pacing->trs, pacing->frame_time, pacing->tr_offset,
-      pacing->reactive, pacing->vrx, s->st20_total_pkts, pacing->frame_idle_time,
+      __func__, idx, pacing->trs, pacing->frame_time, pacing->tr_offset, pacing->reactive,
+      pacing->vrx, s->st20_total_pkts, pacing->frame_idle_time,
       (uint32_t)(((uint64_t)pacing->trs >> 7) << 7),
       (uint32_t)((((uint64_t)(pacing->trs + 127)) >> 7) << 7),
       (double)(((uint64_t)pacing->trs >> 7) << 7) * s->st20_total_pkts / 1e6,
@@ -725,9 +726,9 @@ static inline uint64_t calc_frame_count_since_epoch(struct st_tx_video_session_i
 
   } else {
     notice("%s(%d), EPOCH DROP: frame_count_tai %" PRIu64 " > next_free %" PRIu64
-        " (drop %" PRIu64 "), cur_tai %" PRIu64 " frame_time %.2f\n",
-        __func__, s->idx, frame_count_tai, next_free_frame_slot,
-        frame_count_tai - next_free_frame_slot, cur_tai, s->pacing.frame_time);
+           " (drop %" PRIu64 "), cur_tai %" PRIu64 " frame_time %.2f\n",
+           __func__, s->idx, frame_count_tai, next_free_frame_slot,
+           frame_count_tai - next_free_frame_slot, cur_tai, s->pacing.frame_time);
     ST_SESSION_STAT_ADD(s, port_user_stats.common, stat_epoch_drop,
                         (frame_count_tai - next_free_frame_slot));
     s->stat_epoch_drop_prev_epoch = s->pacing.cur_epochs;
@@ -803,11 +804,10 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
     s->stat_epoch_drop_pending = false;
     s->stat_epoch_drop_time_to_tx = time_to_tx_ns;
     notice("%s(%d), EPOCH DROP PACING: prev_epoch %" PRIu64 " -> new_epoch %" PRIu64
-           " time_to_tx %" PRId64 "us start_tai %" PRIu64
-           " ptp_cursor %" PRIu64 " cur_tai %" PRIu64 "\n",
-           __func__, s->idx, s->stat_epoch_drop_prev_epoch,
-           s->stat_epoch_drop_new_epoch, time_to_tx_ns / 1000,
-           start_time_tai, pacing->ptp_time_cursor, cur_tai);
+           " time_to_tx %" PRId64 "us start_tai %" PRIu64 " ptp_cursor %" PRIu64
+           " cur_tai %" PRIu64 "\n",
+           __func__, s->idx, s->stat_epoch_drop_prev_epoch, s->stat_epoch_drop_new_epoch,
+           time_to_tx_ns / 1000, start_time_tai, pacing->ptp_time_cursor, cur_tai);
   }
 
   /* Track time_to_tx_ns min/max for TSN diagnostics.  These aggregate stats
@@ -833,10 +833,10 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
     else
       s->stat_ttx_borderline++;
     /* Track elapsed delta from ideal frame_time between consecutive sync calls */
-    int64_t ptp_delta = (int64_t)(cur_tai - s->stat_last_sync_ptp) -
-                        (int64_t)pacing->frame_time;
-    int64_t tsc_delta = (int64_t)(cur_tsc - s->stat_last_sync_tsc) -
-                        (int64_t)pacing->frame_time;
+    int64_t ptp_delta =
+        (int64_t)(cur_tai - s->stat_last_sync_ptp) - (int64_t)pacing->frame_time;
+    int64_t tsc_delta =
+        (int64_t)(cur_tsc - s->stat_last_sync_tsc) - (int64_t)pacing->frame_time;
     s->stat_ptp_elapsed_sum += ptp_delta;
     s->stat_tsc_elapsed_sum += tsc_delta;
     s->stat_sync_count++;
@@ -846,17 +846,15 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
 
   dbg("%s(%d), epoch %" PRIu64 " start_tai %" PRIu64 " ptp_cursor %" PRIu64
       " tsc_cursor %" PRIu64 " time_to_tx %" PRId64 " trs %.4f\n",
-      __func__, s->idx, pacing->cur_epochs, start_time_tai,
-      pacing->ptp_time_cursor, pacing->tsc_time_cursor, time_to_tx_ns, pacing->trs);
+      __func__, s->idx, pacing->cur_epochs, start_time_tai, pacing->ptp_time_cursor,
+      pacing->tsc_time_cursor, time_to_tx_ns, pacing->trs);
 
   if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
       (s->stat_tsn_startup_sync_logs < ST_TSN_STARTUP_TRACE_FRAMES)) {
-    notice("%s(%d), TSN STARTUP SYNC[%u]: init_epoch=%" PRIu64
-           " calc_epoch=%" PRIu64 " final_epoch=%" PRIu64
-           " late_advance=%d required_tai=%" PRIu64
-           " cur_tai=%" PRIu64 " start_tai=%" PRIu64
-           " time_to_tx_ns=%" PRId64 " ptp_cursor=%" PRIu64
-           " tsc_cursor=%" PRIu64 "\n",
+    notice("%s(%d), TSN STARTUP SYNC[%u]: init_epoch=%" PRIu64 " calc_epoch=%" PRIu64
+           " final_epoch=%" PRIu64 " late_advance=%d required_tai=%" PRIu64
+           " cur_tai=%" PRIu64 " start_tai=%" PRIu64 " time_to_tx_ns=%" PRId64
+           " ptp_cursor=%" PRIu64 " tsc_cursor=%" PRIu64 "\n",
            __func__, s->idx, s->stat_tsn_startup_sync_logs, init_epoch, calc_epoch,
            pacing->cur_epochs, late_advance, required_tai, cur_tai, start_time_tai,
            time_to_tx_ns, pacing->ptp_time_cursor, pacing->tsc_time_cursor);
@@ -866,12 +864,10 @@ static int tv_sync_pacing(struct mtl_main_impl* impl, struct st_tx_video_session
               (cur_tai >=
                (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS))) &&
              (s->stat_tsn_stable_sync_logs < ST_TSN_STARTUP_TRACE_FRAMES)) {
-    notice("%s(%d), TSN STABLE SYNC[%u]: init_epoch=%" PRIu64
-           " calc_epoch=%" PRIu64 " final_epoch=%" PRIu64
-           " late_advance=%d required_tai=%" PRIu64
-           " cur_tai=%" PRIu64 " start_tai=%" PRIu64
-           " time_to_tx_ns=%" PRId64 " ptp_cursor=%" PRIu64
-           " tsc_cursor=%" PRIu64 "\n",
+    notice("%s(%d), TSN STABLE SYNC[%u]: init_epoch=%" PRIu64 " calc_epoch=%" PRIu64
+           " final_epoch=%" PRIu64 " late_advance=%d required_tai=%" PRIu64
+           " cur_tai=%" PRIu64 " start_tai=%" PRIu64 " time_to_tx_ns=%" PRId64
+           " ptp_cursor=%" PRIu64 " tsc_cursor=%" PRIu64 "\n",
            __func__, s->idx, s->stat_tsn_stable_sync_logs, init_epoch, calc_epoch,
            pacing->cur_epochs, late_advance, required_tai, cur_tai, start_time_tai,
            time_to_tx_ns, pacing->ptp_time_cursor, pacing->tsc_time_cursor);
@@ -926,26 +922,22 @@ static void tv_tsn_record_enqueue(struct mtl_main_impl* impl,
   if (s->stat_tsn_startup_enqueue_logs[port] < ST_TSN_STARTUP_TRACE_FRAMES) {
     notice("%s(%d), TSN STARTUP ENQ[%u]: frame_idx=%u epoch=%" PRIu64
            " sync_to_enq_ptp_ns=%" PRIu64 " sync_to_enq_tsc_ns=%" PRIu64
-           " delta_ptp_ns=%" PRId64 " delta_tsc_ns=%" PRId64
-           " ring_count=%u\n",
+           " delta_ptp_ns=%" PRId64 " delta_tsc_ns=%" PRId64 " ring_count=%u\n",
            __func__, s->idx, s->stat_tsn_startup_enqueue_logs[port], frame->idx,
            frame_epoch, cur_ptp - frame->tsn_debug.sync_ptp,
            cur_tsc - frame->tsn_debug.sync_tsc,
            (int64_t)st_tx_mbuf_get_ptp(pkt) - (int64_t)cur_ptp,
-           (int64_t)st_tx_mbuf_get_tsc(pkt) - (int64_t)cur_tsc,
-           rte_ring_count(ring));
+           (int64_t)st_tx_mbuf_get_tsc(pkt) - (int64_t)cur_tsc, rte_ring_count(ring));
     s->stat_tsn_startup_enqueue_logs[port]++;
   } else if (trace_stable) {
     notice("%s(%d), TSN STABLE ENQ[%u]: frame_idx=%u epoch=%" PRIu64
            " sync_to_enq_ptp_ns=%" PRIu64 " sync_to_enq_tsc_ns=%" PRIu64
-           " delta_ptp_ns=%" PRId64 " delta_tsc_ns=%" PRId64
-           " ring_count=%u\n",
+           " delta_ptp_ns=%" PRId64 " delta_tsc_ns=%" PRId64 " ring_count=%u\n",
            __func__, s->idx, s->stat_tsn_stable_enqueue_logs[port], frame->idx,
            frame_epoch, cur_ptp - frame->tsn_debug.sync_ptp,
            cur_tsc - frame->tsn_debug.sync_tsc,
            (int64_t)st_tx_mbuf_get_ptp(pkt) - (int64_t)cur_ptp,
-           (int64_t)st_tx_mbuf_get_tsc(pkt) - (int64_t)cur_tsc,
-           rte_ring_count(ring));
+           (int64_t)st_tx_mbuf_get_tsc(pkt) - (int64_t)cur_tsc, rte_ring_count(ring));
     s->stat_tsn_stable_enqueue_logs[port]++;
   }
 }
@@ -2163,7 +2155,8 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
           uint64_t sync = tsc_after_sync - tsc_post_getframe;
           if (total > s->stat_overhead_total_ns) s->stat_overhead_total_ns = total;
           if (notify > s->stat_overhead_notify_ns) s->stat_overhead_notify_ns = notify;
-          if (getframe > s->stat_overhead_getframe_ns) s->stat_overhead_getframe_ns = getframe;
+          if (getframe > s->stat_overhead_getframe_ns)
+            s->stat_overhead_getframe_ns = getframe;
           if (sync > s->stat_overhead_sync_ns) s->stat_overhead_sync_ns = sync;
           s->stat_overhead_sum_ns += total;
           s->stat_overhead_count++;
@@ -2186,33 +2179,30 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       }
       if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
           (s->stat_tsn_startup_frame_logs < ST_TSN_STARTUP_TRACE_FRAMES)) {
-        notice("%s(%d), TSN STARTUP FRAME[%u]: frame_idx=%u"
-               " app_epoch=%" PRIu64 " app_tai=%" PRIu64
-               " required_tai=%" PRIu64 " sync_epoch=%" PRIu64
-               " sync_ptp=%" PRIu64 " sync_rtp=%u second_field=%d\n",
-               __func__, idx, s->stat_tsn_startup_frame_logs, next_frame_idx,
-               meta.epoch, meta.timestamp, required_tai, frame->tv_meta.epoch,
-               frame->tv_meta.timestamp, frame->tv_meta.rtp_timestamp,
-               frame->tv_meta.second_field);
+        notice(
+            "%s(%d), TSN STARTUP FRAME[%u]: frame_idx=%u"
+            " app_epoch=%" PRIu64 " app_tai=%" PRIu64 " required_tai=%" PRIu64
+            " sync_epoch=%" PRIu64 " sync_ptp=%" PRIu64 " sync_rtp=%u second_field=%d\n",
+            __func__, idx, s->stat_tsn_startup_frame_logs, next_frame_idx, meta.epoch,
+            meta.timestamp, required_tai, frame->tv_meta.epoch, frame->tv_meta.timestamp,
+            frame->tv_meta.rtp_timestamp, frame->tv_meta.second_field);
         s->stat_tsn_startup_frame_logs++;
-                } else if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
+      } else if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
                  (frame->tsn_debug.sync_ptp >=
                   (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS)) &&
                  (s->stat_tsn_stable_frame_logs < ST_TSN_STARTUP_TRACE_FRAMES)) {
-             notice("%s(%d), TSN STABLE FRAME[%u]: frame_idx=%u"
-               " app_epoch=%" PRIu64 " app_tai=%" PRIu64
-               " required_tai=%" PRIu64 " sync_epoch=%" PRIu64
-               " sync_ptp=%" PRIu64 " sync_rtp=%u second_field=%d\n",
-               __func__, idx, s->stat_tsn_stable_frame_logs, next_frame_idx,
-               meta.epoch, meta.timestamp, required_tai, frame->tv_meta.epoch,
-               frame->tv_meta.timestamp, frame->tv_meta.rtp_timestamp,
-               frame->tv_meta.second_field);
-             s->stat_tsn_stable_frame_logs++;
+        notice(
+            "%s(%d), TSN STABLE FRAME[%u]: frame_idx=%u"
+            " app_epoch=%" PRIu64 " app_tai=%" PRIu64 " required_tai=%" PRIu64
+            " sync_epoch=%" PRIu64 " sync_ptp=%" PRIu64 " sync_rtp=%u second_field=%d\n",
+            __func__, idx, s->stat_tsn_stable_frame_logs, next_frame_idx, meta.epoch,
+            meta.timestamp, required_tai, frame->tv_meta.epoch, frame->tv_meta.timestamp,
+            frame->tv_meta.rtp_timestamp, frame->tv_meta.second_field);
+        s->stat_tsn_stable_frame_logs++;
       }
       dbg("%s(%d), frame %d start: ptp_cursor %" PRIu64 " (sub-sec %" PRIu64
           " >>7 %" PRIu64 ") rtp_ts %u epoch %" PRIu64 "\n",
-          __func__, idx, next_frame_idx,
-          (uint64_t)pacing->ptp_time_cursor,
+          __func__, idx, next_frame_idx, (uint64_t)pacing->ptp_time_cursor,
           (uint64_t)(pacing->ptp_time_cursor % 1000000000ULL),
           (uint64_t)((pacing->ptp_time_cursor % 1000000000ULL) >> 7),
           pacing->rtp_time_stamp, (uint64_t)pacing->cur_epochs);
@@ -2369,9 +2359,9 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
 
   if (s->st20_pkt_idx >= s->st20_total_pkts) {
     struct st_frame_trans* frame_info = &s->st20_frames[s->st20_frame_idx];
-    dbg("%s(%d), frame %d done: ptp_cursor %" PRIu64 " epoch %" PRIu64 "\n",
-        __func__, idx, s->st20_frame_idx,
-        (uint64_t)pacing->ptp_time_cursor, (uint64_t)pacing->cur_epochs);
+    dbg("%s(%d), frame %d done: ptp_cursor %" PRIu64 " epoch %" PRIu64 "\n", __func__,
+        idx, s->st20_frame_idx, (uint64_t)pacing->ptp_time_cursor,
+        (uint64_t)pacing->cur_epochs);
     if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
         (s->stat_tsn_frame_done_logs < ST_TSN_STARTUP_TRACE_FRAMES)) {
       uint64_t frame_epoch;
@@ -2389,13 +2379,12 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       }
 
       notice("%s(%d), TSN STARTUP DONE[%u]: frame_idx=%u epoch=%" PRIu64
-             " frame_ptp=%" PRIu64 " frame_rtp=%u end_ptp=%" PRIu64
-             " end_tsc=%" PRIu64 " span_ptp_ns=%" PRIu64
-             " total_pkts=%d inflight=%d\n",
-             __func__, idx, s->stat_tsn_frame_done_logs, s->st20_frame_idx,
-             frame_epoch, frame_timestamp, frame_rtp, pacing->ptp_time_cursor,
-             pacing->tsc_time_cursor, pacing->ptp_time_cursor - frame_timestamp,
-             s->st20_total_pkts, s->trs_inflight_num[MTL_SESSION_PORT_P]);
+             " frame_ptp=%" PRIu64 " frame_rtp=%u end_ptp=%" PRIu64 " end_tsc=%" PRIu64
+             " span_ptp_ns=%" PRIu64 " total_pkts=%d inflight=%d\n",
+             __func__, idx, s->stat_tsn_frame_done_logs, s->st20_frame_idx, frame_epoch,
+             frame_timestamp, frame_rtp, pacing->ptp_time_cursor, pacing->tsc_time_cursor,
+             pacing->ptp_time_cursor - frame_timestamp, s->st20_total_pkts,
+             s->trs_inflight_num[MTL_SESSION_PORT_P]);
       s->stat_tsn_frame_done_logs++;
     } else if ((s->pacing_way[MTL_SESSION_PORT_P] == ST21_TX_PACING_WAY_TSN) &&
                (frame_info->tsn_debug.sync_ptp >=
@@ -2416,9 +2405,8 @@ static int tv_tasklet_frame(struct mtl_main_impl* impl,
       }
 
       notice("%s(%d), TSN STABLE DONE[%u]: frame_idx=%u epoch=%" PRIu64
-             " frame_ptp=%" PRIu64 " frame_rtp=%u end_ptp=%" PRIu64
-             " end_tsc=%" PRIu64 " span_ptp_ns=%" PRIu64
-             " total_pkts=%d inflight=%d\n",
+             " frame_ptp=%" PRIu64 " frame_rtp=%u end_ptp=%" PRIu64 " end_tsc=%" PRIu64
+             " span_ptp_ns=%" PRIu64 " total_pkts=%d inflight=%d\n",
              __func__, idx, s->stat_tsn_stable_frame_done_logs, s->st20_frame_idx,
              frame_epoch, frame_timestamp, frame_rtp, pacing->ptp_time_cursor,
              pacing->tsc_time_cursor, pacing->ptp_time_cursor - frame_timestamp,
@@ -3881,8 +3869,7 @@ static void tv_stat(struct st_tx_video_sessions_mgr* mgr,
       if (s->stat_lt_future_pkts || s->stat_lt_past_pkts) {
         uint32_t total_lt = s->stat_lt_future_pkts + s->stat_lt_past_pkts;
         notice("TX_VIDEO_SESSION(%d,%d): lt_pkts future=%u(%.1f%%) past=%u(%.1f%%)\n",
-               m_idx, idx,
-               s->stat_lt_future_pkts,
+               m_idx, idx, s->stat_lt_future_pkts,
                total_lt ? 100.0 * s->stat_lt_future_pkts / total_lt : 0.0,
                s->stat_lt_past_pkts,
                total_lt ? 100.0 * s->stat_lt_past_pkts / total_lt : 0.0);
@@ -3891,9 +3878,9 @@ static void tv_stat(struct st_tx_video_sessions_mgr* mgr,
       }
       if (s->stat_overhead_count > 0) {
         uint64_t avg_us = s->stat_overhead_sum_ns / s->stat_overhead_count / 1000;
-        notice("TX_VIDEO_SESSION(%d,%d): frame_overhead avg=%" PRIu64
-               "us max=%" PRIu64 "us (notify_max=%" PRIu64 "us getframe_max=%" PRIu64
-               "us sync_max=%" PRIu64 "us) n=%u\n",
+        notice("TX_VIDEO_SESSION(%d,%d): frame_overhead avg=%" PRIu64 "us max=%" PRIu64
+               "us (notify_max=%" PRIu64 "us getframe_max=%" PRIu64 "us sync_max=%" PRIu64
+               "us) n=%u\n",
                m_idx, idx, avg_us, s->stat_overhead_total_ns / 1000,
                s->stat_overhead_notify_ns / 1000, s->stat_overhead_getframe_ns / 1000,
                s->stat_overhead_sync_ns / 1000, s->stat_overhead_count);
@@ -3906,17 +3893,20 @@ static void tv_stat(struct st_tx_video_sessions_mgr* mgr,
       }
       if (s->stat_tsn_build_calls || s->stat_tsn_tx_calls) {
         uint64_t build_avg_x100 =
-            s->stat_tsn_build_calls ? (100 * s->stat_tsn_build_bulks_sum) / s->stat_tsn_build_calls
-                                    : 0;
+            s->stat_tsn_build_calls
+                ? (100 * s->stat_tsn_build_bulks_sum) / s->stat_tsn_build_calls
+                : 0;
         uint64_t tx_avg_x100 =
-            s->stat_tsn_tx_calls ? (100 * s->stat_tsn_tx_bulks_sum) / s->stat_tsn_tx_calls : 0;
+            s->stat_tsn_tx_calls ? (100 * s->stat_tsn_tx_bulks_sum) / s->stat_tsn_tx_calls
+                                 : 0;
         notice("TX_VIDEO_SESSION(%d,%d): tsn_loops build_avg=%" PRIu64 ".%02" PRIu64
-             " build_max=%u tx_avg=%" PRIu64 ".%02" PRIu64 " tx_max=%u ring_peak=%u/%u ring_stop=%u tx_partial=%u\n",
+               " build_max=%u tx_avg=%" PRIu64 ".%02" PRIu64
+               " tx_max=%u ring_peak=%u/%u ring_stop=%u tx_partial=%u\n",
                m_idx, idx, build_avg_x100 / 100, build_avg_x100 % 100,
                s->stat_tsn_build_bulks_max, tx_avg_x100 / 100, tx_avg_x100 % 100,
                s->stat_tsn_tx_bulks_max, s->stat_tsn_build_ring_peak,
-             s->stat_tsn_tx_ring_peak, s->stat_tsn_build_ring_stop,
-             s->stat_tsn_tx_partial);
+               s->stat_tsn_tx_ring_peak, s->stat_tsn_build_ring_stop,
+               s->stat_tsn_tx_partial);
         s->stat_tsn_build_calls = 0;
         s->stat_tsn_build_bulks_sum = 0;
         s->stat_tsn_build_bulks_max = 0;
@@ -3939,31 +3929,25 @@ static void tv_stat(struct st_tx_video_sessions_mgr* mgr,
             !s->stat_tsn_tx_zero_progress[s_port])
           continue;
 
-        uint64_t pass_avg_x100 =
-            s->stat_tsn_tx_pass_calls[s_port]
-                ? (100 * s->stat_tsn_tx_pass_sum[s_port]) /
-                      s->stat_tsn_tx_pass_calls[s_port]
-                : 0;
+        uint64_t pass_avg_x100 = s->stat_tsn_tx_pass_calls[s_port]
+                                     ? (100 * s->stat_tsn_tx_pass_sum[s_port]) /
+                                           s->stat_tsn_tx_pass_calls[s_port]
+                                     : 0;
 
-         notice("TX_VIDEO_SESSION(%d,%d): tsn_txdiag[%d] pass_avg=%" PRIu64
-           ".%02" PRIu64 " pass_max=%u pass_budget=%u wait=%u inflight=%u"
-           " inflight2=%u cleanup=%u zero=%u deq_empty=%u split=%u"
-           " future_save=%" PRIu64 " partial_save=%" PRIu64
-           " inflight_peak=%u/%u\n",
-               m_idx, idx, s_port, pass_avg_x100 / 100, pass_avg_x100 % 100,
-               s->stat_tsn_tx_pass_max[s_port],
-               s->stat_tsn_tx_pass_budget_hits[s_port],
-               s->stat_tsn_tx_wait_target[s_port],
-               s->stat_tsn_tx_retry_inflight[s_port],
-               s->stat_tsn_tx_retry_inflight2[s_port],
-           s->stat_tsn_tx_retry_cleanup[s_port],
-           s->stat_tsn_tx_zero_progress[s_port],
-               s->stat_tsn_tx_dequeue_empty[s_port],
-               s->stat_tsn_tx_split_boundary[s_port],
-               s->stat_tsn_tx_saved_future_pkts[s_port],
-               s->stat_tsn_tx_saved_partial_pkts[s_port],
-               s->stat_tsn_tx_inflight_peak[s_port],
-               s->stat_tsn_tx_inflight2_peak[s_port]);
+        notice(
+            "TX_VIDEO_SESSION(%d,%d): tsn_txdiag[%d] pass_avg=%" PRIu64 ".%02" PRIu64
+            " pass_max=%u pass_budget=%u wait=%u inflight=%u"
+            " inflight2=%u cleanup=%u zero=%u deq_empty=%u split=%u"
+            " future_save=%" PRIu64 " partial_save=%" PRIu64 " inflight_peak=%u/%u\n",
+            m_idx, idx, s_port, pass_avg_x100 / 100, pass_avg_x100 % 100,
+            s->stat_tsn_tx_pass_max[s_port], s->stat_tsn_tx_pass_budget_hits[s_port],
+            s->stat_tsn_tx_wait_target[s_port], s->stat_tsn_tx_retry_inflight[s_port],
+            s->stat_tsn_tx_retry_inflight2[s_port], s->stat_tsn_tx_retry_cleanup[s_port],
+            s->stat_tsn_tx_zero_progress[s_port], s->stat_tsn_tx_dequeue_empty[s_port],
+            s->stat_tsn_tx_split_boundary[s_port],
+            s->stat_tsn_tx_saved_future_pkts[s_port],
+            s->stat_tsn_tx_saved_partial_pkts[s_port],
+            s->stat_tsn_tx_inflight_peak[s_port], s->stat_tsn_tx_inflight2_peak[s_port]);
 
         s->stat_tsn_tx_wait_target[s_port] = 0;
         s->stat_tsn_tx_retry_inflight[s_port] = 0;
@@ -3984,17 +3968,18 @@ static void tv_stat(struct st_tx_video_sessions_mgr* mgr,
       for (int s_port = 0; s_port < s->ops.num_port; s_port++) {
         if (!s->stat_tsn_mode_samples[s_port]) continue;
 
-        notice("TX_VIDEO_SESSION(%d,%d): tsn_mode[%d] samples=%u lag=%u enter=%u recover=%u state=%s min_deq_headroom=%+" PRId64
-               "us min_submit_headroom=%+" PRId64 "us min_submit_gap=%+" PRId64
-               "us min_prev_last=%+" PRId64 "us\n",
-               m_idx, idx, s_port, s->stat_tsn_mode_samples[s_port],
-               s->stat_tsn_mode_lag_samples[s_port], s->stat_tsn_mode_entries[s_port],
-               s->stat_tsn_mode_recoveries[s_port],
-               s->stat_tsn_mode_lagging[s_port] ? "lagging" : "healthy",
-               s->stat_tsn_mode_min_deq_headroom_ns[s_port] / 1000,
-               s->stat_tsn_mode_min_submit_headroom_ns[s_port] / 1000,
-               s->stat_tsn_mode_min_submit_gap_ns[s_port] / 1000,
-               s->stat_tsn_mode_min_prev_last_delta_ns[s_port] / 1000);
+        notice(
+            "TX_VIDEO_SESSION(%d,%d): tsn_mode[%d] samples=%u lag=%u enter=%u recover=%u "
+            "state=%s min_deq_headroom=%+" PRId64 "us min_submit_headroom=%+" PRId64
+            "us min_submit_gap=%+" PRId64 "us min_prev_last=%+" PRId64 "us\n",
+            m_idx, idx, s_port, s->stat_tsn_mode_samples[s_port],
+            s->stat_tsn_mode_lag_samples[s_port], s->stat_tsn_mode_entries[s_port],
+            s->stat_tsn_mode_recoveries[s_port],
+            s->stat_tsn_mode_lagging[s_port] ? "lagging" : "healthy",
+            s->stat_tsn_mode_min_deq_headroom_ns[s_port] / 1000,
+            s->stat_tsn_mode_min_submit_headroom_ns[s_port] / 1000,
+            s->stat_tsn_mode_min_submit_gap_ns[s_port] / 1000,
+            s->stat_tsn_mode_min_prev_last_delta_ns[s_port] / 1000);
         s->stat_tsn_mode_diag_init[s_port] = false;
         s->stat_tsn_mode_samples[s_port] = 0;
         s->stat_tsn_mode_lag_samples[s_port] = 0;
@@ -4726,7 +4711,7 @@ int st20_frame_tx_start(struct mtl_main_impl* impl, struct st_tx_video_session_i
 
   uint16_t send = mt_drv_no_sys_txq(impl, port)
                       ? mt_txq_burst_busy(s->queue[s_port], &pkt, 1, 10)
-                      : mt_sys_queue_tx_burst(impl, port, &pkt, 1);
+                      : mt_sys_queue_tx_burst(impl, port, &pkt, 1, NULL);
   if (send < 1) {
     err("%s(%d), tx fail\n", __func__, port);
     rte_pktmbuf_free(pkt);

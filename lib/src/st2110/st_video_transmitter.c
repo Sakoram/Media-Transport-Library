@@ -862,30 +862,13 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
                                          enum mtl_session_port s_port) {
   unsigned int bulk = s->bulk;
   struct rte_ring* ring = s->ring[s_port];
-  int idx = s->idx;
   int tx = 0;
   unsigned int n;
-  uint64_t target_tsc, cur_tsc;
+  uint64_t target_tsc = 0, cur_tsc = 0;
   enum mtl_port port = mt_port_logic2phy(s->port_maps, s_port);
   struct mt_interface* inf = mt_if(impl, port);
 
-  target_tsc = s->trs_target_tsc[s_port];
-  if (target_tsc) {
-    cur_tsc = mt_get_tsc(impl);
-    if (cur_tsc < target_tsc) {
-      uint64_t delta = target_tsc - cur_tsc;
-      if (likely(delta < NS_PER_S)) {
-        s->stat_tsn_tx_wait_target[s_port]++;
-        s->stat_trs_ret_code[s_port] = -STI_TSCTRS_TARGET_TSC_NOT_REACH;
-        return delta < mt_sch_schedule_ns(impl) ? MTL_TASKLET_HAS_PENDING
-                                                : MTL_TASKLET_ALL_DONE;
-      } else {
-        err("%s(%d,%d), invalid trs tsc cur %" PRIu64 " target %" PRIu64 "\n", __func__,
-            idx, s_port, cur_tsc, target_tsc);
-      }
-    }
-    s->trs_target_tsc[s_port] = 0;
-  }
+  /* TSC gate removed — submit immediately, let HW schedule via launch time */
 
   if (s->trs_inflight_num[s_port] > 0) {
     s->stat_tsn_tx_retry_inflight[s_port]++;
@@ -1017,24 +1000,7 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
         }
       }
     }
-    if (cur_tsc < target_tsc) {
-      uint64_t delta = target_tsc - cur_tsc;
-
-      if (likely(delta < NS_PER_S)) {
-        s->trs_target_tsc[s_port] = target_tsc;
-        video_trs_save_inflight(s, s_port, &pkts[0], valid_bulk, false);
-        video_trs_tsn_note_inflight_peak(s, s_port);
-        s->stat_tsn_tx_wait_target[s_port]++;
-        s->stat_tsn_tx_saved_future_pkts[s_port] += valid_bulk;
-        s->stat_trs_ret_code[s_port] = -STI_TSCTRS_TARGET_TSC_NOT_REACH;
-        return delta < mt_sch_schedule_ns(impl) ? MTL_TASKLET_HAS_PENDING
-                                                : MTL_TASKLET_ALL_DONE;
-      } else {
-        err("%s(%d), invalid tsc cur %" PRIu64 " target %" PRIu64 "\n", __func__, idx,
-            cur_tsc, target_tsc);
-      }
-    }
-
+    /* No TSC gate — submit immediately, let HW schedule via launch time */
     tx = video_trs_burst(impl, s, s_port, &pkts[0], valid_bulk);
     s->stat_tsn_tx_calls++;
     s->stat_tsn_tx_bulks_sum++;

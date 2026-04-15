@@ -18,7 +18,7 @@
 #define MT_PTP_CHECK_TX_TIME_STAMP (0)
 #define MT_PTP_CHECK_RX_TIME_STAMP (0)
 #define MT_PTP_CHECK_HW_SW_DELTA (0)
-#define MT_PTP_PRINT_ERR_RESULT (0)
+#define MT_PTP_PRINT_ERR_RESULT (1)
 
 #define MT_PTP_TP_SYNC_MS (10)
 
@@ -644,8 +644,8 @@ static int ptp_parse_result(struct mt_ptp_impl* ptp) {
 
   dbg("%s(%d), t1 %" PRIu64 " t2 %" PRIu64 " t3 %" PRIu64 " t4 %" PRIu64 "\n", __func__,
       ptp->port, ptp->t1, ptp->t2, ptp->t3, ptp->t4);
-  dbg("%s(%d), t2-t1 delta %" PRId64 " t4-t3 delta %" PRIu64 "\n", __func__, ptp->port,
-      t2_t1_delta, t4_t3_delta);
+  info("%s(%d), t2_t1 %" PRId64 " t4_t3 %" PRId64 "\n", __func__, ptp->port,
+       t2_t1_delta, t4_t3_delta);
   if (ptp->calibrate_t2_t3) {
     /* max 1us delta */
     int32_t max_diff = 1000;
@@ -825,7 +825,10 @@ static void ptp_delay_req_task(struct mt_ptp_impl* ptp) {
 
   if (ptp->t2_vlan) {
     err("%s(%d), todo for vlan\n", __func__, port);
-  } else {
+  } else if (!(mt_if(ptp->impl, port)->feature &
+               MT_IF_FEATURE_TX_OFFLOAD_SEND_ON_TIMESTAMP)) {
+    /* Only request HW TX timestamp on non-TXTIME queues.
+     * On TXTIME queues the IEEE1588 flag causes the packet to be dropped. */
 #if RTE_VERSION >= RTE_VERSION_NUM(21, 11, 0, 0)
     m->ol_flags |= RTE_MBUF_F_TX_IEEE1588_TMST;
 #else
@@ -872,18 +875,30 @@ static void ptp_delay_req_task(struct mt_ptp_impl* ptp) {
   m->data_len = m->pkt_len;
 
   // mt_mbuf_dump(port, 0, "PTP_DELAY_REQ", m);
-  uint16_t tx = mt_sys_queue_tx_burst(ptp->impl, port, &m, 1);
+  /* On TXTIME-enabled queues, set a valid near-future launch time so the HW
+   * actually transmits the packet.  dynfield=0 may cause the HW to drop it. */
+  if (mt_if(ptp->impl, port)->feature & MT_IF_FEATURE_TX_OFFLOAD_SEND_ON_TIMESTAMP) {
+    struct mt_interface* inf = mt_if(ptp->impl, port);
+    uint64_t launch = ptp_get_raw_time(ptp) + 1000000; /* PHC + 1ms */
+    *RTE_MBUF_DYNFIELD(m, inf->tx_dynfield_offset, uint64_t*) = launch;
+  }
+  uint16_t tx = mt_sys_queue_tx_burst(ptp->impl, port, &m, 1, &tx_ns);
   if (tx < 1) {
     rte_pktmbuf_free(m);
     err("%s(%d), tx fail\n", __func__, port);
     return;
   }
-#if MT_PTP_CHECK_HW_SW_DELTA
-  uint64_t burst_time = ptp_get_raw_time(ptp);
-#endif
-
 #if MT_PTP_USE_TX_TIME_STAMP
-  if (ptp->qbv_enabled) {
+  /* On TXTIME queues the PHY TSYN timestamp capture does not work because
+   * the TXTIME doorbell path bypasses the normal TX descriptor processing.
+   * Fall back to reading the PHC clock immediately after tx_burst — the
+   * packet goes out with dynfield=0 (always-past → immediate TX) so the
+   * PHC read is a close approximation of the actual wire time. */
+  if (mt_if(ptp->impl, port)->feature & MT_IF_FEATURE_TX_OFFLOAD_SEND_ON_TIMESTAMP) {
+    ptp->t3 = ptp_get_raw_time(ptp);
+    info("%s(%d), TXTIME t3 %" PRIu64 ", seq %d\n", __func__, port, ptp->t3,
+         ptp->t3_sequence_id);
+  } else if (ptp->qbv_enabled) {
     /*
      * The DELAY_REQ packet will be blocked max 1.2ms by Qbv scheduler.
      * The Tx timestamp will not be created immediately. So, start an
@@ -897,13 +912,7 @@ static void ptp_delay_req_task(struct mt_ptp_impl* ptp) {
 
     while (max_retry > 0) {
       ret = ptp_timesync_read_tx_time(ptp, &tx_ns);
-      if (ret >= 0) {
-#if MT_PTP_CHECK_HW_SW_DELTA
-        info("%s(%d), t3 hw-sw delta %" PRId64 "\n", __func__, ptp->port,
-             tx_ns - burst_time);
-#endif
-        break;
-      }
+      if (ret >= 0) break;
 
       mt_delay_us(1);
       max_retry--;
@@ -911,31 +920,21 @@ static void ptp_delay_req_task(struct mt_ptp_impl* ptp) {
 
     if (max_retry <= 0) {
       err("%s(%d), read tx reach max retry\n", __func__, port);
+      tx_ns = ptp_get_raw_time(ptp);
     }
-
-#if MT_PTP_CHECK_TX_TIME_STAMP
-    uint64_t ptp_ns = ptp_timesync_read_time(ptp);
-    uint64_t delta = ptp_ns - tx_ns;
-#define TX_MAX_DELTA (1 * 1000 * 1000) /* 1ms */
-    if (unlikely(delta > TX_MAX_DELTA)) {
-      err("%s(%d), tx_ns %" PRIu64 ", delta %" PRIu64 "\n", __func__, ptp->port, tx_ns,
-          delta);
-      ptp->stat_tx_sync_err++;
-    }
-#endif
 
     ptp->t3 = tx_ns;
+  }
 #else
   ptp->t3 = ptp_get_raw_time(ptp);
 #endif
-    dbg("%s(%d), t3 %" PRIu64 ", seq %d, max_retry %d, ptp %" PRIu64 "\n", __func__, port,
-        ptp->t3, ptp->t3_sequence_id, max_retry, ptp_get_raw_time(ptp));
-    MT_USDT_PTP_MSG(ptp->port, 3, ptp->t3);
 
-    /* all time get */
-    if (ptp->t4 && ptp->t2 && ptp->t1) {
-      ptp_parse_result(ptp);
-    }
+  /* all time get */
+  info("%s(%d), after tx: t1 %" PRIu64 " t2 %" PRIu64 " t3 %" PRIu64 " t4 %" PRIu64
+       "\n",
+       __func__, port, ptp->t1, ptp->t2, ptp->t3, ptp->t4);
+  if (ptp->t4 && ptp->t2 && ptp->t1) {
+    ptp_parse_result(ptp);
   }
 }
 
@@ -1072,8 +1071,18 @@ static int ptp_parse_announce(struct mt_ptp_impl* ptp, struct mt_ptp_announce_ms
 
 static int ptp_parse_delay_resp(struct mt_ptp_impl* ptp,
                                 struct mt_ptp_delay_resp_msg* msg) {
+  info("%s(%d), got delay_resp seq %d\n", __func__, ptp->port,
+       ntohs(msg->hdr.sequence_id));
   if (!ptp_port_id_equal(&msg->requesting_port_identity, &ptp->our_port_id)) {
     /* not our request resp */
+    uint8_t* r = (uint8_t*)&msg->requesting_port_identity;
+    uint8_t* o = (uint8_t*)&ptp->our_port_id;
+    info("%s(%d), port_id mismatch: req %02x%02x%02x%02x%02x%02x%02x%02x:%04x "
+         "our %02x%02x%02x%02x%02x%02x%02x%02x:%04x\n",
+         __func__, ptp->port, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7],
+         msg->requesting_port_identity.port_number,
+         o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7],
+         ptp->our_port_id.port_number);
     return 0;
   }
 

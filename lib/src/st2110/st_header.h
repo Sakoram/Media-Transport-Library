@@ -435,8 +435,8 @@ struct st_tx_video_session_impl {
   uint32_t stat_trans_recalculate_warmup;
   uint32_t stat_exceed_frame_time;
   /* TSN LaunchTime direction counters (set in transmitter) */
-  uint32_t stat_lt_future_pkts;  /* LaunchTime was in the future at submission */
-  uint32_t stat_lt_past_pkts;    /* LaunchTime was in the past at submission */
+  uint32_t stat_lt_future_pkts; /* LaunchTime was in the future at submission */
+  uint32_t stat_lt_past_pkts;   /* LaunchTime was in the past at submission */
   bool stat_user_busy_first;
   uint32_t stat_user_busy;       /* get_next_frame or dequeue_bulk from rtp ring fail */
   uint32_t stat_lines_not_ready; /* query app lines not ready */
@@ -453,11 +453,11 @@ struct st_tx_video_session_impl {
   int64_t stat_time_to_tx_max;
   bool stat_time_to_tx_init; /* false until first sample recorded */
   /* TSN drift diagnostics: PTP and TSC elapsed between consecutive sync calls */
-  uint64_t stat_last_sync_ptp; /* PTP time at last tv_sync_pacing */
-  uint64_t stat_last_sync_tsc; /* TSC time at last tv_sync_pacing */
+  uint64_t stat_last_sync_ptp;  /* PTP time at last tv_sync_pacing */
+  uint64_t stat_last_sync_tsc;  /* TSC time at last tv_sync_pacing */
   int64_t stat_ptp_elapsed_sum; /* sum of (ptp_elapsed - frame_time) in ns */
   int64_t stat_tsc_elapsed_sum; /* sum of (tsc_elapsed - frame_time) in ns */
-  uint32_t stat_sync_count; /* number of tv_sync_pacing calls in this stat period */
+  uint32_t stat_sync_count;     /* number of tv_sync_pacing calls in this stat period */
   bool stat_tsn_startup_init_logged;
   uint64_t stat_tsn_trace_anchor_ptp;
   uint32_t stat_tsn_startup_sync_logs;
@@ -502,19 +502,21 @@ struct st_tx_video_session_impl {
   uint64_t stat_epoch_drop_prev_epoch; /* cur_epochs before drop */
   uint64_t stat_epoch_drop_new_epoch;  /* cur_epochs after drop */
   int64_t stat_epoch_drop_time_to_tx;  /* time_to_tx at drop frame */
-  bool stat_epoch_drop_pending;        /* drop happened, needs logging in tv_sync_pacing */
+  bool stat_epoch_drop_pending; /* drop happened, needs logging in tv_sync_pacing */
   /* TSN time_to_tx histogram bands */
   uint32_t stat_ttx_future;     /* time_to_tx > +1ms (LTs solidly in future) */
   uint32_t stat_ttx_borderline; /* time_to_tx -1ms..+1ms (LTs crossing zero) */
   uint32_t stat_ttx_past;       /* time_to_tx < -1ms (LTs in past) */
-  /* TSN per-frame overhead breakdown (between last pkt of frame N and first pkt of frame N+1) */
-  uint64_t stat_frame_done_tsc;      /* TSC at frame completion (last pkt enqueued) */
-  uint64_t stat_overhead_total_ns;   /* max total overhead: frame_done → sync_pacing done */
-  uint64_t stat_overhead_notify_ns;  /* max time in tv_notify_frame_done / pipeline callback */
+  /* TSN per-frame overhead breakdown (between last pkt of frame N and first pkt of frame
+   * N+1) */
+  uint64_t stat_frame_done_tsc;    /* TSC at frame completion (last pkt enqueued) */
+  uint64_t stat_overhead_total_ns; /* max total overhead: frame_done → sync_pacing done */
+  uint64_t
+      stat_overhead_notify_ns; /* max time in tv_notify_frame_done / pipeline callback */
   uint64_t stat_overhead_getframe_ns; /* max time in get_next_frame callback */
-  uint64_t stat_overhead_sync_ns;    /* max time in tv_sync_pacing */
-  uint64_t stat_overhead_sum_ns;     /* sum of total overhead for averaging */
-  uint32_t stat_overhead_count;      /* count of measured frames */
+  uint64_t stat_overhead_sync_ns;     /* max time in tv_sync_pacing */
+  uint64_t stat_overhead_sum_ns;      /* sum of total overhead for averaging */
+  uint32_t stat_overhead_count;       /* count of measured frames */
   /* TSN work-conserving diagnostics */
   uint32_t stat_tsn_build_calls;     /* tv_tasklet_frame() calls that built >=1 bulk */
   uint64_t stat_tsn_build_bulks_sum; /* total bulks built across those calls */

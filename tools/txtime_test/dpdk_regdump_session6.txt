@@ -1,0 +1,382 @@
+EAL: Detected CPU lcores: 112
+EAL: Detected NUMA nodes: 2
+EAL: Detected shared linkage of DPDK
+EAL: Multi-process socket /var/run/dpdk/rte/mp_socket
+EAL: Selected IOVA mode 'PA'
+EAL: VFIO support initialized
+EAL: Using IOMMU type 1 (Type 1)
+ICE_INIT: ice_load_pkg_type(): Active package is: 1.3.43.0, ICE OS Default Package (double VLAN mode)
+ICE_DRIVER: ice_tx_queue_start(): TXTIME: queue 1 entering TXTIME path (tsq=0x3200b4cc40 ts_flag=0x800000)
+ICE_DRIVER: ice_tx_queue_start(): TXTIME: ice_aq_set_txtimeq succeeded for queue 1
+ICE_DRIVER: ice_tx_queue_start(): TXTIME: ice_aq_ena_dis_txtimeq(enable=1) succeeded for queue 1
+ICE_DRIVER: ice_set_rx_function(): Using Scalar Bulk Alloc (port 0).
+ICE_DRIVER: ice_tx_queue_start(): TXTIME: queue 1 entering TXTIME path (tsq=0x3200b4cc40 ts_flag=0x800000)
+ICE_DRIVER: ice_tx_queue_start(): TXTIME: ice_aq_set_txtimeq succeeded for queue 1
+ICE_DRIVER: ice_tx_queue_start(): TXTIME: ice_aq_ena_dis_txtimeq(enable=1) succeeded for queue 1
+ICE_DRIVER: ice_set_rx_function(): Using Scalar Bulk Alloc (port 0).
+Dynfield: offset=96  flag_bit=23  flag_mask=0x800000
+=== Performing stop→start cycle (kernel VSI rebuild equivalent) ===
+dev_stop ret=0
+dev_start ret=0
+PHC validated: 1776062106.243442622 (retry 0)
+PCI device: 0000:ca:00.0
+BAR0 mapped: 0x7f544bfa0000 (len=134217728)
+Waiting for link (up to 30s)...
+  +1s: still DOWN
+  +2s: still DOWN
+  +3s: still DOWN
+  +4s: still DOWN
+  +5s: still DOWN
+  +6s: still DOWN
+  +7s: still DOWN
+  +8s: still DOWN
+  +9s: still DOWN
+  +10s: still DOWN
+  +11s: still DOWN
+  +12s: still DOWN
+  +13s: still DOWN
+  +14s: still DOWN
+  +15s: still DOWN
+  +16s: still DOWN
+  +17s: still DOWN
+  +18s: still DOWN
+  +19s: still DOWN
+  +20s: still DOWN
+  +21s: still DOWN
+Link: UP  speed 100000 Mbps
+
+=== TXTIME HW Register Dump: AFTER INIT (before tests) ===
+E830_GLTXTIME_TS_CFG      = 0x00000001 (ENABLE=1 STORAGE_MODE=0 PIPE_LATENCY=0)
+FETCH_PROFILE[0,0]        = 0x00000000 (FETCH_TS_DESC=0 FIFO_THRESH=0)
+WRR_CREDITS               = 0x00000000 (DBL=0 COMP=0)
+WRR_WEIGHTS               = 0x00000000 (DBL=0 COMP=0)
+OUTST_REQ_CNTL            = 0x00000200 (THRESHOLD=512 SNAPSHOT=0)
+GL_MDET_TX_PQM            = 0x00000000 (VALID=0)
+GL_MDET_TX_PQM_FIFO       = 0x00000000 (MAL_TYPE=0 VALID=0 EVT_CNT=0)
+  TXTIME ctx[q=0]: data={0x418da000 0x00000000 0x00000680 0x00003c09 0x00000000 0x00002000 0x00000000}
+    txtime_ena=0 drbell32=1 ts_res=7 ts_round=0 pacing_slot=0 merging=0 fetch_prof=0
+    int_q_state: d3[31:30]=0x0 d4=0x00000000 d5=0x00002000 d6[5:0]=0x0
+  TXTIME ctx[q=1]: data={0x4ee62977 0x00000000 0x00000680 0x00003e11 0x00000000 0x00002000 0x00000000}
+    txtime_ena=1 drbell32=1 ts_res=7 ts_round=0 pacing_slot=0 merging=0 fetch_prof=0
+    int_q_state: d3[31:30]=0x0 d4=0x00000000 d5=0x00002000 d6[5:0]=0x0
+  TXTIME ctx[q=2]: data={0x41973520 0x00000000 0x00000680 0x00003c09 0x00000000 0x00002000 0x00000000}
+    txtime_ena=0 drbell32=1 ts_res=7 ts_round=0 pacing_slot=0 merging=0 fetch_prof=0
+    int_q_state: d3[31:30]=0x0 d4=0x00000000 d5=0x00002000 d6[5:0]=0x0
+  TXTIME ctx[q=3]: data={0x42aa7400 0x00000000 0x00000680 0x00003c09 0x00000000 0x00002000 0x00000000}
+    txtime_ena=0 drbell32=1 ts_res=7 ts_round=0 pacing_slot=0 merging=0 fetch_prof=0
+    int_q_state: d3[31:30]=0x0 d4=0x00000000 d5=0x00002000 d6[5:0]=0x0
+  QTX_COMM_HEAD[0]        = 0xdeadbeef
+  QTX_COMM_HEAD[1]        = 0xdeadbeef
+=== End Register Dump ===
+
+
+############################################################
+#  E830 TX Time (Launch Time) Test Suite                   #
+#  Each test: send 10 pkts, wait 3s, try recovery pkt     #
+############################################################
+
+========================================
+TEST 0: Sanity — send 3 pkts WITHOUT txtime flag
+========================================
+tx_burst (no txtime): 3 / 3
+After 2s: opkts=3  obytes=246  oerr=0
+OK: non-txtime packets transmitted successfully
+
+========================================
+TEST 1: Baseline: all future +1ms
+========================================
+PHC now       : 1776062130627112196 ns  (1776062130.627112196)
+  pkt[ 0] off=      +1000000  launch_nsec=628112196  >>7=4907126
+  pkt[ 1] off=      +1000000  launch_nsec=628112196  >>7=4907126
+  pkt[ 2] off=      +1000000  launch_nsec=628112196  >>7=4907126
+  pkt[ 3] off=      +1000000  launch_nsec=628112196  >>7=4907126
+  pkt[ 4] off=      +1000000  launch_nsec=628112196  >>7=4907126
+  pkt[ 5] off=      +1000000  launch_nsec=628112196  >>7=4907126
+  pkt[ 6] off=      +1000000  launch_nsec=628112196  >>7=4907126
+  pkt[ 7] off=      +1000000  launch_nsec=628112196  >>7=4907126
+  pkt[ 8] off=      +1000000  launch_nsec=628112196  >>7=4907126
+  pkt[ 9] off=      +1000000  launch_nsec=628112196  >>7=4907126
+tx_burst      : 10 / 10  (wall 0 us)
+  +1s: opkts=10  obytes=820  oerr=0  PHC=1776062131.627323017
+  +2s: opkts=10  obytes=820  oerr=0  PHC=1776062132.627527834
+  +3s: opkts=10  obytes=820  oerr=0  PHC=1776062133.627730250
+Recovery      : sent=1  opkts_total=11  oerr=0
+
+========================================
+TEST 2: All past -1ms
+========================================
+PHC now       : 1776062133828040433 ns  (1776062133.828040433)
+  pkt[ 0] off=      -1000000  launch_nsec=827040433  >>7=6461253
+  pkt[ 1] off=      -1000000  launch_nsec=827040433  >>7=6461253
+  pkt[ 2] off=      -1000000  launch_nsec=827040433  >>7=6461253
+  pkt[ 3] off=      -1000000  launch_nsec=827040433  >>7=6461253
+  pkt[ 4] off=      -1000000  launch_nsec=827040433  >>7=6461253
+  pkt[ 5] off=      -1000000  launch_nsec=827040433  >>7=6461253
+  pkt[ 6] off=      -1000000  launch_nsec=827040433  >>7=6461253
+  pkt[ 7] off=      -1000000  launch_nsec=827040433  >>7=6461253
+  pkt[ 8] off=      -1000000  launch_nsec=827040433  >>7=6461253
+  pkt[ 9] off=      -1000000  launch_nsec=827040433  >>7=6461253
+tx_burst      : 10 / 10  (wall 0 us)
+  +1s: opkts=10  obytes=820  oerr=0  PHC=1776062134.828252697
+  +2s: opkts=10  obytes=820  oerr=0  PHC=1776062135.828455527
+  +3s: opkts=10  obytes=820  oerr=0  PHC=1776062136.828657107
+Recovery      : sent=1  opkts_total=11  oerr=0
+
+========================================
+TEST 3: Alternating +1ms / -1ms
+========================================
+PHC now       : 1776062137028967059 ns  (1776062137.028967059)
+  pkt[ 0] off=      +1000000  launch_nsec=029967059  >>7=234117
+  pkt[ 1] off=      -1000000  launch_nsec=027967059  >>7=218492
+  pkt[ 2] off=      +1000000  launch_nsec=029967059  >>7=234117
+  pkt[ 3] off=      -1000000  launch_nsec=027967059  >>7=218492
+  pkt[ 4] off=      +1000000  launch_nsec=029967059  >>7=234117
+  pkt[ 5] off=      -1000000  launch_nsec=027967059  >>7=218492
+  pkt[ 6] off=      +1000000  launch_nsec=029967059  >>7=234117
+  pkt[ 7] off=      -1000000  launch_nsec=027967059  >>7=218492
+  pkt[ 8] off=      +1000000  launch_nsec=029967059  >>7=234117
+  pkt[ 9] off=      -1000000  launch_nsec=027967059  >>7=218492
+tx_burst      : 10 / 10  (wall 0 us)
+  +1s: opkts=10  obytes=820  oerr=0  PHC=1776062138.029175466
+  +2s: opkts=10  obytes=820  oerr=0  PHC=1776062139.029375198
+  +3s: opkts=10  obytes=820  oerr=0  PHC=1776062140.029576185
+Recovery      : sent=1  opkts_total=11  oerr=0
+
+========================================
+TEST 4: All past -50ms (within 67ms window)
+========================================
+PHC now       : 1776062140229888861 ns  (1776062140.229888861)
+  pkt[ 0] off=     -50000000  launch_nsec=179888861  >>7=1405381
+  pkt[ 1] off=     -50000000  launch_nsec=179888861  >>7=1405381
+  pkt[ 2] off=     -50000000  launch_nsec=179888861  >>7=1405381
+  pkt[ 3] off=     -50000000  launch_nsec=179888861  >>7=1405381
+  pkt[ 4] off=     -50000000  launch_nsec=179888861  >>7=1405381
+  pkt[ 5] off=     -50000000  launch_nsec=179888861  >>7=1405381
+  pkt[ 6] off=     -50000000  launch_nsec=179888861  >>7=1405381
+  pkt[ 7] off=     -50000000  launch_nsec=179888861  >>7=1405381
+  pkt[ 8] off=     -50000000  launch_nsec=179888861  >>7=1405381
+  pkt[ 9] off=     -50000000  launch_nsec=179888861  >>7=1405381
+tx_burst      : 10 / 10  (wall 0 us)
+  +1s: opkts=10  obytes=820  oerr=0  PHC=1776062141.230097310
+  +2s: opkts=10  obytes=820  oerr=0  PHC=1776062142.230296771
+  +3s: opkts=10  obytes=820  oerr=0  PHC=1776062143.230495853
+Recovery      : sent=1  opkts_total=11  oerr=0
+
+========================================
+TEST 5: All past -500ms (outside 67ms window)
+========================================
+PHC now       : 1776062143430805744 ns  (1776062143.430805744)
+  pkt[ 0] off=    -500000000  launch_nsec=930805744  >>7=7271919
+  pkt[ 1] off=    -500000000  launch_nsec=930805744  >>7=7271919
+  pkt[ 2] off=    -500000000  launch_nsec=930805744  >>7=7271919
+  pkt[ 3] off=    -500000000  launch_nsec=930805744  >>7=7271919
+  pkt[ 4] off=    -500000000  launch_nsec=930805744  >>7=7271919
+  pkt[ 5] off=    -500000000  launch_nsec=930805744  >>7=7271919
+  pkt[ 6] off=    -500000000  launch_nsec=930805744  >>7=7271919
+  pkt[ 7] off=    -500000000  launch_nsec=930805744  >>7=7271919
+  pkt[ 8] off=    -500000000  launch_nsec=930805744  >>7=7271919
+  pkt[ 9] off=    -500000000  launch_nsec=930805744  >>7=7271919
+tx_burst      : 10 / 10  (wall 0 us)
+  +1s: opkts=10  obytes=820  oerr=0  PHC=1776062144.431012195
+  +2s: opkts=10  obytes=820  oerr=0  PHC=1776062145.431210048
+  +3s: opkts=10  obytes=820  oerr=0  PHC=1776062146.431416858
+Recovery      : sent=1  opkts_total=11  oerr=0
+
+========================================
+TEST 6: Alternating +1ms / -500ms
+========================================
+PHC now       : 1776062146631730291 ns  (1776062146.631730291)
+  pkt[ 0] off=      +1000000  launch_nsec=632730291  >>7=4943205
+  pkt[ 1] off=    -500000000  launch_nsec=131730291  >>7=1029142
+  pkt[ 2] off=      +1000000  launch_nsec=632730291  >>7=4943205
+  pkt[ 3] off=    -500000000  launch_nsec=131730291  >>7=1029142
+  pkt[ 4] off=      +1000000  launch_nsec=632730291  >>7=4943205
+  pkt[ 5] off=    -500000000  launch_nsec=131730291  >>7=1029142
+  pkt[ 6] off=      +1000000  launch_nsec=632730291  >>7=4943205
+  pkt[ 7] off=    -500000000  launch_nsec=131730291  >>7=1029142
+  pkt[ 8] off=      +1000000  launch_nsec=632730291  >>7=4943205
+  pkt[ 9] off=    -500000000  launch_nsec=131730291  >>7=1029142
+tx_burst      : 10 / 10  (wall 1 us)
+  +1s: opkts=10  obytes=820  oerr=0  PHC=1776062147.631943406
+  +2s: opkts=10  obytes=820  oerr=0  PHC=1776062148.632147926
+  +3s: opkts=10  obytes=820  oerr=0  PHC=1776062149.632348496
+Recovery      : sent=1  opkts_total=11  oerr=0
+
+========================================
+TEST 7: Offset = 0 (launch = PHC now)
+========================================
+PHC now       : 1776062149832659065 ns  (1776062149.832659065)
+  pkt[ 0] off=            +0  launch_nsec=832659065  >>7=6505148
+  pkt[ 1] off=            +0  launch_nsec=832659065  >>7=6505148
+  pkt[ 2] off=            +0  launch_nsec=832659065  >>7=6505148
+  pkt[ 3] off=            +0  launch_nsec=832659065  >>7=6505148
+  pkt[ 4] off=            +0  launch_nsec=832659065  >>7=6505148
+  pkt[ 5] off=            +0  launch_nsec=832659065  >>7=6505148
+  pkt[ 6] off=            +0  launch_nsec=832659065  >>7=6505148
+  pkt[ 7] off=            +0  launch_nsec=832659065  >>7=6505148
+  pkt[ 8] off=            +0  launch_nsec=832659065  >>7=6505148
+  pkt[ 9] off=            +0  launch_nsec=832659065  >>7=6505148
+tx_burst      : 10 / 10  (wall 0 us)
+  +1s: opkts=10  obytes=820  oerr=0  PHC=1776062150.832865261
+  +2s: opkts=10  obytes=820  oerr=0  PHC=1776062151.833065811
+  +3s: opkts=10  obytes=820  oerr=0  PHC=1776062152.833266160
+Recovery      : sent=1  opkts_total=11  oerr=0
+
+========================================
+TEST 8: Far future +1s (nsec wraps to same value)
+========================================
+PHC now       : 1776062153033577926 ns  (1776062153.033577926)
+  pkt[ 0] off=   +1000000000  launch_nsec=033577926  >>7=262327
+  pkt[ 1] off=   +1000000000  launch_nsec=033577926  >>7=262327
+  pkt[ 2] off=   +1000000000  launch_nsec=033577926  >>7=262327
+  pkt[ 3] off=   +1000000000  launch_nsec=033577926  >>7=262327
+  pkt[ 4] off=   +1000000000  launch_nsec=033577926  >>7=262327
+  pkt[ 5] off=   +1000000000  launch_nsec=033577926  >>7=262327
+  pkt[ 6] off=   +1000000000  launch_nsec=033577926  >>7=262327
+  pkt[ 7] off=   +1000000000  launch_nsec=033577926  >>7=262327
+  pkt[ 8] off=   +1000000000  launch_nsec=033577926  >>7=262327
+  pkt[ 9] off=   +1000000000  launch_nsec=033577926  >>7=262327
+tx_burst      : 10 / 10  (wall 0 us)
+  +1s: opkts=10  obytes=820  oerr=0  PHC=1776062154.033785465
+  +2s: opkts=10  obytes=820  oerr=0  PHC=1776062155.033986013
+  +3s: opkts=10  obytes=820  oerr=0  PHC=1776062156.034185907
+Recovery      : sent=1  opkts_total=11  oerr=0
+
+========================================
+TEST 9: Alternating +1s / -1ms
+========================================
+PHC now       : 1776062156234497411 ns  (1776062156.234497411)
+  pkt[ 0] off=   +1000000000  launch_nsec=234497411  >>7=1832011
+  pkt[ 1] off=      -1000000  launch_nsec=233497411  >>7=1824198
+  pkt[ 2] off=   +1000000000  launch_nsec=234497411  >>7=1832011
+  pkt[ 3] off=      -1000000  launch_nsec=233497411  >>7=1824198
+  pkt[ 4] off=   +1000000000  launch_nsec=234497411  >>7=1832011
+  pkt[ 5] off=      -1000000  launch_nsec=233497411  >>7=1824198
+  pkt[ 6] off=   +1000000000  launch_nsec=234497411  >>7=1832011
+  pkt[ 7] off=      -1000000  launch_nsec=233497411  >>7=1824198
+  pkt[ 8] off=   +1000000000  launch_nsec=234497411  >>7=1832011
+  pkt[ 9] off=      -1000000  launch_nsec=233497411  >>7=1824198
+tx_burst      : 10 / 10  (wall 1 us)
+  +1s: opkts=10  obytes=820  oerr=0  PHC=1776062157.234714106
+  +2s: opkts=10  obytes=820  oerr=0  PHC=1776062158.234915117
+  +3s: opkts=10  obytes=820  oerr=0  PHC=1776062159.235114986
+Recovery      : sent=1  opkts_total=11  oerr=0
+
+========================================
+TEST 10: Graduated: +1ms to -999ms
+========================================
+PHC now       : 1776062159435424470 ns  (1776062159.435424470)
+  pkt[ 0] off=      +1000000  launch_nsec=436424470  >>7=3409566
+  pkt[ 1] off=      -1000000  launch_nsec=434424470  >>7=3393941
+  pkt[ 2] off=     -10000000  launch_nsec=425424470  >>7=3323628
+  pkt[ 3] off=     -30000000  launch_nsec=405424470  >>7=3167378
+  pkt[ 4] off=     -50000000  launch_nsec=385424470  >>7=3011128
+  pkt[ 5] off=     -67000000  launch_nsec=368424470  >>7=2878316
+  pkt[ 6] off=    -100000000  launch_nsec=335424470  >>7=2620503
+  pkt[ 7] off=    -250000000  launch_nsec=185424470  >>7=1448628
+  pkt[ 8] off=    -500000000  launch_nsec=935424470  >>7=7308003
+  pkt[ 9] off=    -999000000  launch_nsec=436424470  >>7=3409566
+tx_burst      : 10 / 10  (wall 0 us)
+  +1s: opkts=10  obytes=820  oerr=0  PHC=1776062160.435636266
+  +2s: opkts=10  obytes=820  oerr=0  PHC=1776062161.435835166
+  +3s: opkts=10  obytes=820  oerr=0  PHC=1776062162.436035728
+Recovery      : sent=1  opkts_total=11  oerr=0
+
+========================================
+TEST 11: MTL-style stream (TS-only doorbell)
+  count=100  step=7936ns  offset=5ms  bulk=4
+  total span: 793 us
+========================================
+PHC base      : 1776062162636346835 ns  (1776062162.636346835)
+First launch  : 1776062162641346944 ns  (PHC + 5 ms)
+Last launch   : 1776062162642132608 ns  (PHC + 5 ms + 785 us)
+
+Submitting 100 packets in bulks of 4 (TSC-gated)...
+  bulk[  0..  3] sent=4/4  PHC_delta=+499 us  wall=4468 us
+  bulk[ 40.. 43] sent=4/4  PHC_delta=+499 us  wall=4785 us
+  bulk[ 80.. 83] sent=4/4  PHC_delta=+499 us  wall=5103 us
+  bulk[ 96.. 99] sent=4/4  PHC_delta=+499 us  wall=5230 us
+
+Stream submission complete.
+  total_sent (accepted by tx_burst) : 100 / 100
+  burst_zero_count                  : 0
+  stall_events                      : 0
+  worst_stall                       : 0 us
+
+Waiting for HW transmission...
+  +1s: opkts=100  obytes=8200  oerr=0  PHC=1776062163.641809262
+  +2s: opkts=100  obytes=8200  oerr=0  PHC=1776062164.642009478
+  +3s: opkts=100  obytes=8200  oerr=0  PHC=1776062165.642208291
+  +4s: opkts=100  obytes=8200  oerr=0  PHC=1776062166.642407248
+  +5s: opkts=100  obytes=8200  oerr=0  PHC=1776062167.642606323
+
+FINAL: opkts=100  obytes=8200  oerr=0
+>>> TX TIME SCHEDULING IS ACTIVE — packets transmitted! <<<
+
+========================================
+TEST 12: Hold-time test (+50ms, poll opackets)
+========================================
+PHC at send   : 1776062167.642853648
+Launch time   : 1776062167.692853760 (+50ms)
+19-bit tstamp : 170040 (0x29838)
+tx_burst      : 1 / 1
+
+Polling opackets (100us interval, 200ms window):
+   wall_us     opkts  PHC_delta  status
+       221         1    -49773   <<<< TRANSMITTED
+       345         1    -49650  
+       469         1    -49526  
+       593         1    -49402  
+       716         1    -49279  
+     12568         1    -37427  
+     24913         1    -25081  
+     37260         1    -12734  
+     49604         1      -390  
+     61952         1    +11958  
+     74296         1    +24301  
+     86638         1    +36643  
+     98978         1    +48984  
+    111320         1    +61326  
+    123660         1    +73667  
+    136001         1    +86008  
+    148339         1    +98346  
+    160681         1   +110688  
+    173021         1   +123028  
+    185363         1   +135371  
+    197705         1   +147712  
+    210042         1   +160050  
+    222383         1   +172391  
+    234731         1   +184740  
+    246952         1   +196961  
+
+--- Hold Test Result ---
+  Transmitted at 221 us — NO HOLD (immediate TX)
+  Expected: ~50000 us if HW scheduling active
+  Verdict: SCHEDULING NOT ACTIVE
+
+=== TXTIME HW Register Dump: AFTER ALL TESTS ===
+E830_GLTXTIME_TS_CFG      = 0x00000001 (ENABLE=1 STORAGE_MODE=0 PIPE_LATENCY=0)
+FETCH_PROFILE[0,0]        = 0x00000000 (FETCH_TS_DESC=0 FIFO_THRESH=0)
+WRR_CREDITS               = 0x00000000 (DBL=0 COMP=0)
+WRR_WEIGHTS               = 0x00000000 (DBL=0 COMP=0)
+OUTST_REQ_CNTL            = 0x00000200 (THRESHOLD=512 SNAPSHOT=0)
+GL_MDET_TX_PQM            = 0x00000000 (VALID=0)
+GL_MDET_TX_PQM_FIFO       = 0x00000000 (MAL_TYPE=0 VALID=0 EVT_CNT=0)
+  TXTIME ctx[q=0]: data={0x418da000 0x00000000 0x00000680 0x00003c09 0x00000000 0x00002000 0x00000000}
+    txtime_ena=0 drbell32=1 ts_res=7 ts_round=0 pacing_slot=0 merging=0 fetch_prof=0
+    int_q_state: d3[31:30]=0x0 d4=0x00000000 d5=0x00002000 d6[5:0]=0x0
+  TXTIME ctx[q=1]: data={0x4ee62977 0x00000000 0x00000680 0xc0003e11 0xbb06b835 0x0003e231 0x00000000}
+    txtime_ena=1 drbell32=1 ts_res=7 ts_round=0 pacing_slot=0 merging=0 fetch_prof=0
+    int_q_state: d3[31:30]=0x3 d4=0xbb06b835 d5=0x0003e231 d6[5:0]=0x0
+  TXTIME ctx[q=2]: data={0x41973520 0x00000000 0x00000680 0x00003c09 0x00000000 0x00002000 0x00000000}
+    txtime_ena=0 drbell32=1 ts_res=7 ts_round=0 pacing_slot=0 merging=0 fetch_prof=0
+    int_q_state: d3[31:30]=0x0 d4=0x00000000 d5=0x00002000 d6[5:0]=0x0
+  TXTIME ctx[q=3]: data={0x42aa7400 0x00000000 0x00000680 0x00003c09 0x00000000 0x00002000 0x00000000}
+    txtime_ena=0 drbell32=1 ts_res=7 ts_round=0 pacing_slot=0 merging=0 fetch_prof=0
+    int_q_state: d3[31:30]=0x0 d4=0x00000000 d5=0x00002000 d6[5:0]=0x0
+  QTX_COMM_HEAD[0]        = 0xdeadbeef
+  QTX_COMM_HEAD[1]        = 0xdeadbeef
+=== End Register Dump ===
+
+
+--- All tests complete ---
