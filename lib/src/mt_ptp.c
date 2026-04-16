@@ -644,8 +644,8 @@ static int ptp_parse_result(struct mt_ptp_impl* ptp) {
 
   dbg("%s(%d), t1 %" PRIu64 " t2 %" PRIu64 " t3 %" PRIu64 " t4 %" PRIu64 "\n", __func__,
       ptp->port, ptp->t1, ptp->t2, ptp->t3, ptp->t4);
-  info("%s(%d), t2_t1 %" PRId64 " t4_t3 %" PRId64 "\n", __func__, ptp->port,
-       t2_t1_delta, t4_t3_delta);
+  info("%s(%d), t2_t1 %" PRId64 " t4_t3 %" PRId64 "\n", __func__, ptp->port, t2_t1_delta,
+       t4_t3_delta);
   if (ptp->calibrate_t2_t3) {
     /* max 1us delta */
     int32_t max_diff = 1000;
@@ -930,8 +930,7 @@ static void ptp_delay_req_task(struct mt_ptp_impl* ptp) {
 #endif
 
   /* all time get */
-  info("%s(%d), after tx: t1 %" PRIu64 " t2 %" PRIu64 " t3 %" PRIu64 " t4 %" PRIu64
-       "\n",
+  info("%s(%d), after tx: t1 %" PRIu64 " t2 %" PRIu64 " t3 %" PRIu64 " t4 %" PRIu64 "\n",
        __func__, port, ptp->t1, ptp->t2, ptp->t3, ptp->t4);
   if (ptp->t4 && ptp->t2 && ptp->t1) {
     ptp_parse_result(ptp);
@@ -1077,12 +1076,12 @@ static int ptp_parse_delay_resp(struct mt_ptp_impl* ptp,
     /* not our request resp */
     uint8_t* r = (uint8_t*)&msg->requesting_port_identity;
     uint8_t* o = (uint8_t*)&ptp->our_port_id;
-    info("%s(%d), port_id mismatch: req %02x%02x%02x%02x%02x%02x%02x%02x:%04x "
-         "our %02x%02x%02x%02x%02x%02x%02x%02x:%04x\n",
-         __func__, ptp->port, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7],
-         msg->requesting_port_identity.port_number,
-         o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7],
-         ptp->our_port_id.port_number);
+    info(
+        "%s(%d), port_id mismatch: req %02x%02x%02x%02x%02x%02x%02x%02x:%04x "
+        "our %02x%02x%02x%02x%02x%02x%02x%02x:%04x\n",
+        __func__, ptp->port, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7],
+        msg->requesting_port_identity.port_number, o[0], o[1], o[2], o[3], o[4], o[5],
+        o[6], o[7], ptp->our_port_id.port_number);
     return 0;
   }
 

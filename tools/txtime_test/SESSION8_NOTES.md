@@ -78,7 +78,7 @@ Kernel ice: Kahawai_2.2.8
 
 ## 4. Experiment Log
 
-### Experiment 1: Double-start (stop→start cycle) — ✅ SUCCESS!
+### Experiment 1: Double-start (stop→start cycle) — ✅ SUCCESS
 
 **Hypothesis**: FW needs the queue-disable (0x0C31) → scheduler rebuild → queue re-add sequence to establish TXTIME→data DMA linkage. DPDK's first `dev_start` creates queues from scratch (no 0x0C31). A `stop→start` cycle provides the missing 0x0C31.
 
@@ -122,6 +122,7 @@ PHC_delta at TX = -29371µs (released ~29ms before launch time)
 ```
 
 **Comparison with session 7 (clean DPDK, no scheduler rebuild)**:
+
 | Metric | Session 7 | Session 8 | Improvement |
 |--------|-----------|-----------|-------------|
 | Hold test | 221µs (immediate) | 20,624µs (held ~20ms) | **93× improvement** |
@@ -202,7 +203,7 @@ For MTL (ST 2110-20, requires sub-µs precision), the scheduler rebuild is manda
 1. **Embed scheduler rebuild + queue cycle into DPDK's first `ice_dev_start()`**: Instead of requiring a double-start from the app, the DPDK driver should:
    - On first `ice_dev_start()` for a TXTIME port: add dummy queues → disable them (0x0C31) → rebuild scheduler (0x040F + 0x0401) → re-add queues (0x0C30 + 0x0C35)
    - This eliminates the need for the app to do stop→start
-   
+
 2. **Verify with MTL**: Test if MTL's `dev_start_timesync()` and initialization path can use this fix. MTL may already call `dev_stop → dev_start` during init.
 
 3. **Fix R² metric**: Update `parse_txtime_pcap.py` to use arrival-time-vs-linear-fit R² instead of Pearson r on gap sizes.

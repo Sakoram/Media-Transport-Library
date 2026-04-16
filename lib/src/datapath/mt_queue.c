@@ -378,8 +378,8 @@ uint16_t mt_sys_queue_tx_burst(struct mtl_main_impl* impl, enum mtl_port port,
   if (tx == 0 && nb_pkts > 0) {
     static int fail_cnt;
     if (fail_cnt++ < 10) {
-      err("%s(%d), tx_burst returned 0, queue %u\n",
-          __func__, port, dp->txq_sys_entry->queue_id);
+      err("%s(%d), tx_burst returned 0, queue %u\n", __func__, port,
+          dp->txq_sys_entry->queue_id);
     }
   }
 

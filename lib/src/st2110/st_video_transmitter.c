@@ -5,6 +5,7 @@
 #include "st_video_transmitter.h"
 
 #include <math.h>
+#include <stdlib.h>
 
 #include "../datapath/mt_queue.h"
 #include "../mt_log.h"
@@ -12,8 +13,6 @@
 #include "../mt_rtcp.h"
 #include "st_err.h"
 #include "st_tx_video_session.h"
-
-#include <stdlib.h>
 
 /* To compensate for inaccurate throughput during warmup, several packets are added.
  * This adds a superficial difference between the RTP timestamp and the transmission
@@ -65,8 +64,8 @@ static uint16_t video_trs_burst_pad(struct mtl_main_impl* impl,
 
 static inline void video_trs_save_inflight(struct st_tx_video_session_impl* s,
                                            enum mtl_session_port s_port,
-                                           struct rte_mbuf** pkts,
-                                           unsigned int nb_pkts, bool use_two) {
+                                           struct rte_mbuf** pkts, unsigned int nb_pkts,
+                                           bool use_two) {
   unsigned int i;
 
   if (!use_two) {
@@ -101,13 +100,11 @@ static inline void video_trs_tsn_mark_launch_time(struct st_tx_video_session_imp
 
 static void video_trs_tsn_mode_diag(struct st_tx_video_session_impl* s,
                                     enum mtl_session_port s_port,
-                                    struct st_frame_trans* frame,
-                                    uint64_t frame_epoch, uint32_t frame_rtp,
-                                    bool have_prev_boundary, int64_t delta_ptp,
-                                    int64_t delta_tsc, int64_t boundary_ptp,
-                                    int64_t submit_boundary_ptp,
-                                    int64_t submit_boundary_tsc,
-                                    int32_t boundary_rtp) {
+                                    struct st_frame_trans* frame, uint64_t frame_epoch,
+                                    uint32_t frame_rtp, bool have_prev_boundary,
+                                    int64_t delta_ptp, int64_t delta_tsc,
+                                    int64_t boundary_ptp, int64_t submit_boundary_ptp,
+                                    int64_t submit_boundary_tsc, int32_t boundary_rtp) {
   int64_t sync_to_dequeue_ptp;
   int64_t enqueue_to_dequeue_ptp = 0;
   int64_t dequeue_headroom_ptp;
@@ -119,12 +116,11 @@ static void video_trs_tsn_mode_diag(struct st_tx_video_session_impl* s,
 
   if (!frame->tsn_debug.first_dequeue_valid[s_port]) return;
 
-  sync_to_dequeue_ptp =
-      (int64_t)frame->tsn_debug.first_dequeue_ptp[s_port] - (int64_t)frame->tsn_debug.sync_ptp;
+  sync_to_dequeue_ptp = (int64_t)frame->tsn_debug.first_dequeue_ptp[s_port] -
+                        (int64_t)frame->tsn_debug.sync_ptp;
   if (frame->tsn_debug.first_enqueue_valid[s_port]) {
-    enqueue_to_dequeue_ptp =
-        (int64_t)frame->tsn_debug.first_dequeue_ptp[s_port] -
-        (int64_t)frame->tsn_debug.first_enqueue_ptp[s_port];
+    enqueue_to_dequeue_ptp = (int64_t)frame->tsn_debug.first_dequeue_ptp[s_port] -
+                             (int64_t)frame->tsn_debug.first_enqueue_ptp[s_port];
   }
   dequeue_headroom_ptp = frame->tsn_debug.sync_time_to_tx_ns - sync_to_dequeue_ptp;
 
@@ -153,18 +149,16 @@ static void video_trs_tsn_mode_diag(struct st_tx_video_session_impl* s,
   s->stat_tsn_mode_samples[s_port]++;
 
   if (prev_lagging) {
-    bool recovered = (dequeue_headroom_ptp > ST_TSN_MODE_EXIT_DEQ_HEADROOM_NS) &&
-                     (!have_prev_boundary ||
-                      (submit_boundary_ptp > ST_TSN_MODE_EXIT_SUBMIT_GAP_NS)) &&
-                     (!have_prev_last_delta ||
-                      (prev_last_delta_ptp > ST_TSN_MODE_EXIT_LAST_LATE_NS));
+    bool recovered =
+        (dequeue_headroom_ptp > ST_TSN_MODE_EXIT_DEQ_HEADROOM_NS) &&
+        (!have_prev_boundary || (submit_boundary_ptp > ST_TSN_MODE_EXIT_SUBMIT_GAP_NS)) &&
+        (!have_prev_last_delta || (prev_last_delta_ptp > ST_TSN_MODE_EXIT_LAST_LATE_NS));
     if (recovered) lagging = false;
   } else {
-    bool enter_lag = (dequeue_headroom_ptp < ST_TSN_MODE_ENTER_DEQ_HEADROOM_NS) ||
-                     (have_prev_boundary &&
-                      (submit_boundary_ptp < ST_TSN_MODE_ENTER_SUBMIT_GAP_NS)) ||
-                     (have_prev_last_delta &&
-                      (prev_last_delta_ptp < ST_TSN_MODE_ENTER_LAST_LATE_NS));
+    bool enter_lag =
+        (dequeue_headroom_ptp < ST_TSN_MODE_ENTER_DEQ_HEADROOM_NS) ||
+        (have_prev_boundary && (submit_boundary_ptp < ST_TSN_MODE_ENTER_SUBMIT_GAP_NS)) ||
+        (have_prev_last_delta && (prev_last_delta_ptp < ST_TSN_MODE_ENTER_LAST_LATE_NS));
     if (enter_lag) lagging = true;
   }
 
@@ -180,10 +174,9 @@ static void video_trs_tsn_mode_diag(struct st_tx_video_session_impl* s,
   if (s->stat_tsn_mode_logs[s_port] >= ST_TSN_MODE_DIAG_MAX) return;
 
   notice("%s(%d,%d), TSN MODE[%u]: state=%s prev=%s frame_idx=%d epoch=%" PRIu64
-         " frame_rtp=%u sync_time_to_tx_ns=%" PRId64
-         " sync_to_deq_ptp_ns=%" PRId64 " enqueue_to_deq_ptp_ns=%" PRId64
-         " deq_headroom_ptp_ns=%" PRId64 " submit_headroom_ptp_ns=%" PRId64
-         " submit_headroom_tsc_ns=%" PRId64
+         " frame_rtp=%u sync_time_to_tx_ns=%" PRId64 " sync_to_deq_ptp_ns=%" PRId64
+         " enqueue_to_deq_ptp_ns=%" PRId64 " deq_headroom_ptp_ns=%" PRId64
+         " submit_headroom_ptp_ns=%" PRId64 " submit_headroom_tsc_ns=%" PRId64
          " prev_last_delta_ptp_ns=%" PRId64 " prev_last_delta_tsc_ns=%" PRId64
          " submit_gap_ptp_ns=%" PRId64 " submit_gap_tsc_ns=%" PRId64
          " target_gap_ptp_ns=%" PRId64 " gap_rtp=%d ring_count=%u inflight=%u\n",
@@ -197,8 +190,8 @@ static void video_trs_tsn_mode_diag(struct st_tx_video_session_impl* s,
   s->stat_tsn_mode_logs[s_port]++;
 }
 
-static inline void video_trs_tsn_note_inflight_peak(
-    struct st_tx_video_session_impl* s, enum mtl_session_port s_port) {
+static inline void video_trs_tsn_note_inflight_peak(struct st_tx_video_session_impl* s,
+                                                    enum mtl_session_port s_port) {
   if (s->trs_inflight_num[s_port] > s->stat_tsn_tx_inflight_peak[s_port])
     s->stat_tsn_tx_inflight_peak[s_port] = s->trs_inflight_num[s_port];
   if (s->trs_inflight_num2[s_port] > s->stat_tsn_tx_inflight2_peak[s_port])
@@ -207,10 +200,9 @@ static inline void video_trs_tsn_note_inflight_peak(
 
 static void video_trs_tsn_stall_diag(struct mtl_main_impl* impl,
                                      struct st_tx_video_session_impl* s,
-                                     enum mtl_session_port s_port,
-                                     const char* phase, struct rte_ring* ring,
-                                     struct rte_mbuf** pkts, unsigned int requested,
-                                     unsigned int sent) {
+                                     enum mtl_session_port s_port, const char* phase,
+                                     struct rte_ring* ring, struct rte_mbuf** pkts,
+                                     unsigned int requested, unsigned int sent) {
   struct st_frame_trans* frame;
   uint64_t cur_tsc;
   uint64_t cur_ptp;
@@ -296,7 +288,8 @@ static uint16_t video_trs_burst(struct mtl_main_impl* impl,
       int32_t boundary_rtp = 0;
       uint64_t prev_epoch = 0;
       bool have_prev_boundary = s->stat_tsn_prev_last_valid[s_port];
-      bool trace_startup = s->stat_tsn_startup_tx_logs[s_port] < ST_TSN_STARTUP_TRACE_FRAMES;
+      bool trace_startup =
+          s->stat_tsn_startup_tx_logs[s_port] < ST_TSN_STARTUP_TRACE_FRAMES;
       bool trace_stable = false;
       bool stable_window = false;
       bool headroom_anomaly = (delta_ptp < ST_TSN_HEADROOM_ANOMALY_NS);
@@ -305,10 +298,10 @@ static uint16_t video_trs_burst(struct mtl_main_impl* impl,
       uint32_t frame_rtp;
 
       if (have_prev_boundary) {
-        boundary_tsc = (int64_t)target_tsc -
-                       (int64_t)s->stat_tsn_prev_last_target_tsc[s_port];
-        boundary_ptp = (int64_t)target_ptp -
-                       (int64_t)s->stat_tsn_prev_last_target_ptp[s_port];
+        boundary_tsc =
+            (int64_t)target_tsc - (int64_t)s->stat_tsn_prev_last_target_tsc[s_port];
+        boundary_ptp =
+            (int64_t)target_ptp - (int64_t)s->stat_tsn_prev_last_target_ptp[s_port];
         submit_boundary_tsc =
             (int64_t)cur_tsc - (int64_t)s->stat_tsn_prev_last_submit_tsc[s_port];
         submit_boundary_ptp =
@@ -327,88 +320,78 @@ static uint16_t video_trs_burst(struct mtl_main_impl* impl,
       }
 
       if (have_prev_boundary) {
-        boundary_rtp = (int32_t)frame_rtp -
-                       (int32_t)s->stat_tsn_prev_last_frame_rtp[s_port];
-        }
+        boundary_rtp =
+            (int32_t)frame_rtp - (int32_t)s->stat_tsn_prev_last_frame_rtp[s_port];
+      }
 
       if (s->stat_tsn_trace_anchor_ptp == 0) s->stat_tsn_trace_anchor_ptp = cur_ptp;
-        stable_window =
-            (cur_ptp >= (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS));
-        trace_stable = stable_window &&
-                       (s->stat_tsn_stable_tx_logs[s_port] < ST_TSN_STARTUP_TRACE_FRAMES);
+      stable_window =
+          (cur_ptp >= (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS));
+      trace_stable = stable_window &&
+                     (s->stat_tsn_stable_tx_logs[s_port] < ST_TSN_STARTUP_TRACE_FRAMES);
 
-        sync_to_submit_ptp = (int64_t)cur_ptp - (int64_t)frame->tsn_debug.sync_ptp;
-        sync_to_submit_tsc = (int64_t)cur_tsc - (int64_t)frame->tsn_debug.sync_tsc;
-        if (frame->tsn_debug.first_enqueue_valid[s_port]) {
+      sync_to_submit_ptp = (int64_t)cur_ptp - (int64_t)frame->tsn_debug.sync_ptp;
+      sync_to_submit_tsc = (int64_t)cur_tsc - (int64_t)frame->tsn_debug.sync_tsc;
+      if (frame->tsn_debug.first_enqueue_valid[s_port]) {
         enqueue_to_submit_ptp =
-              (int64_t)cur_ptp - (int64_t)frame->tsn_debug.first_enqueue_ptp[s_port];
+            (int64_t)cur_ptp - (int64_t)frame->tsn_debug.first_enqueue_ptp[s_port];
         enqueue_to_submit_tsc =
-              (int64_t)cur_tsc - (int64_t)frame->tsn_debug.first_enqueue_tsc[s_port];
+            (int64_t)cur_tsc - (int64_t)frame->tsn_debug.first_enqueue_tsc[s_port];
         enqueue_delta_ptp =
-              (int64_t)target_ptp - (int64_t)frame->tsn_debug.first_enqueue_ptp[s_port];
-        }
-        if (frame->tsn_debug.first_dequeue_valid[s_port]) {
-          sync_to_dequeue_ptp =
-              (int64_t)frame->tsn_debug.first_dequeue_ptp[s_port] -
-              (int64_t)frame->tsn_debug.sync_ptp;
+            (int64_t)target_ptp - (int64_t)frame->tsn_debug.first_enqueue_ptp[s_port];
+      }
+      if (frame->tsn_debug.first_dequeue_valid[s_port]) {
+        sync_to_dequeue_ptp = (int64_t)frame->tsn_debug.first_dequeue_ptp[s_port] -
+                              (int64_t)frame->tsn_debug.sync_ptp;
         dequeue_to_submit_ptp =
-              (int64_t)cur_ptp - (int64_t)frame->tsn_debug.first_dequeue_ptp[s_port];
+            (int64_t)cur_ptp - (int64_t)frame->tsn_debug.first_dequeue_ptp[s_port];
         dequeue_to_submit_tsc =
-              (int64_t)cur_tsc - (int64_t)frame->tsn_debug.first_dequeue_tsc[s_port];
+            (int64_t)cur_tsc - (int64_t)frame->tsn_debug.first_dequeue_tsc[s_port];
         dequeue_delta_ptp =
-              (int64_t)target_ptp - (int64_t)frame->tsn_debug.first_dequeue_ptp[s_port];
+            (int64_t)target_ptp - (int64_t)frame->tsn_debug.first_dequeue_ptp[s_port];
       }
 
       if (trace_startup) {
         notice("%s(%d,%d), TSN STARTUP TX[%u]: frame_idx=%d epoch=%" PRIu64
                " frame_ptp=%" PRIu64 " frame_rtp=%u target_ptp=%" PRIu64
-               " cur_ptp=%" PRIu64 " delta_ptp_ns=%" PRId64
-               " target_tsc=%" PRIu64 " cur_tsc=%" PRIu64
-               " delta_tsc_ns=%" PRId64
-               " prev_epoch=%" PRIu64 " gap_ptp_ns=%" PRId64
-               " gap_tsc_ns=%" PRId64 " submit_gap_ptp_ns=%" PRId64
+               " cur_ptp=%" PRIu64 " delta_ptp_ns=%" PRId64 " target_tsc=%" PRIu64
+               " cur_tsc=%" PRIu64 " delta_tsc_ns=%" PRId64 " prev_epoch=%" PRIu64
+               " gap_ptp_ns=%" PRId64 " gap_tsc_ns=%" PRId64 " submit_gap_ptp_ns=%" PRId64
                " submit_gap_tsc_ns=%" PRId64 " gap_rtp=%d\n",
-               __func__, s->idx, s_port, s->stat_tsn_startup_tx_logs[s_port],
-               frame->idx, frame_epoch, frame_timestamp, frame_rtp, target_ptp, cur_ptp,
-               delta_ptp, target_tsc, cur_tsc, delta_tsc, prev_epoch, boundary_ptp,
-               boundary_tsc, submit_boundary_ptp, submit_boundary_tsc, boundary_rtp);
+               __func__, s->idx, s_port, s->stat_tsn_startup_tx_logs[s_port], frame->idx,
+               frame_epoch, frame_timestamp, frame_rtp, target_ptp, cur_ptp, delta_ptp,
+               target_tsc, cur_tsc, delta_tsc, prev_epoch, boundary_ptp, boundary_tsc,
+               submit_boundary_ptp, submit_boundary_tsc, boundary_rtp);
         s->stat_tsn_startup_tx_logs[s_port]++;
       } else if (trace_stable) {
         notice("%s(%d,%d), TSN STABLE TX[%u]: frame_idx=%d epoch=%" PRIu64
                " frame_ptp=%" PRIu64 " frame_rtp=%u target_ptp=%" PRIu64
-               " cur_ptp=%" PRIu64 " delta_ptp_ns=%" PRId64
-               " target_tsc=%" PRIu64 " cur_tsc=%" PRIu64
-               " delta_tsc_ns=%" PRId64
-               " prev_epoch=%" PRIu64 " gap_ptp_ns=%" PRId64
-               " gap_tsc_ns=%" PRId64 " submit_gap_ptp_ns=%" PRId64
+               " cur_ptp=%" PRIu64 " delta_ptp_ns=%" PRId64 " target_tsc=%" PRIu64
+               " cur_tsc=%" PRIu64 " delta_tsc_ns=%" PRId64 " prev_epoch=%" PRIu64
+               " gap_ptp_ns=%" PRId64 " gap_tsc_ns=%" PRId64 " submit_gap_ptp_ns=%" PRId64
                " submit_gap_tsc_ns=%" PRId64 " gap_rtp=%d\n",
-               __func__, s->idx, s_port, s->stat_tsn_stable_tx_logs[s_port],
-               frame->idx, frame_epoch, frame_timestamp, frame_rtp, target_ptp, cur_ptp,
-               delta_ptp, target_tsc, cur_tsc, delta_tsc, prev_epoch, boundary_ptp,
-               boundary_tsc, submit_boundary_ptp, submit_boundary_tsc, boundary_rtp);
+               __func__, s->idx, s_port, s->stat_tsn_stable_tx_logs[s_port], frame->idx,
+               frame_epoch, frame_timestamp, frame_rtp, target_ptp, cur_ptp, delta_ptp,
+               target_tsc, cur_tsc, delta_tsc, prev_epoch, boundary_ptp, boundary_tsc,
+               submit_boundary_ptp, submit_boundary_tsc, boundary_rtp);
         s->stat_tsn_stable_tx_logs[s_port]++;
-      } else if (headroom_anomaly &&
-                 (s->stat_tsn_headroom_anomaly_logs[s_port] <
-                  ST_TSN_HEADROOM_ANOMALY_MAX)) {
+      } else if (headroom_anomaly && (s->stat_tsn_headroom_anomaly_logs[s_port] <
+                                      ST_TSN_HEADROOM_ANOMALY_MAX)) {
         notice("%s(%d,%d), TSN HEADROOM ANOMALY[%u]: frame_idx=%d epoch=%" PRIu64
                " sync_time_to_tx_ns=%" PRId64 " delta_ptp_ns=%" PRId64
                " delta_tsc_ns=%" PRId64 " sync_to_submit_ptp_ns=%" PRId64
-               " sync_to_submit_tsc_ns=%" PRId64
-               " sync_to_deq_ptp_ns=%" PRId64
-               " enqueue_to_submit_ptp_ns=%" PRId64
-               " enqueue_to_submit_tsc_ns=%" PRId64
-               " dequeue_to_submit_ptp_ns=%" PRId64
-               " dequeue_to_submit_tsc_ns=%" PRId64
-               " enqueue_delta_ptp_ns=%" PRId64
-               " dequeue_delta_ptp_ns=%" PRId64
+               " sync_to_submit_tsc_ns=%" PRId64 " sync_to_deq_ptp_ns=%" PRId64
+               " enqueue_to_submit_ptp_ns=%" PRId64 " enqueue_to_submit_tsc_ns=%" PRId64
+               " dequeue_to_submit_ptp_ns=%" PRId64 " dequeue_to_submit_tsc_ns=%" PRId64
+               " enqueue_delta_ptp_ns=%" PRId64 " dequeue_delta_ptp_ns=%" PRId64
                " target_gap_ptp_ns=%" PRId64 " submit_gap_ptp_ns=%" PRId64
                " gap_rtp=%d prev_epoch=%" PRIu64 "\n",
                __func__, s->idx, s_port, s->stat_tsn_headroom_anomaly_logs[s_port],
                frame->idx, frame_epoch, frame->tsn_debug.sync_time_to_tx_ns, delta_ptp,
                delta_tsc, sync_to_submit_ptp, sync_to_submit_tsc, sync_to_dequeue_ptp,
                enqueue_to_submit_ptp, enqueue_to_submit_tsc, dequeue_to_submit_ptp,
-               dequeue_to_submit_tsc, enqueue_delta_ptp, dequeue_delta_ptp,
-               boundary_ptp, submit_boundary_ptp, boundary_rtp, prev_epoch);
+               dequeue_to_submit_tsc, enqueue_delta_ptp, dequeue_delta_ptp, boundary_ptp,
+               submit_boundary_ptp, boundary_rtp, prev_epoch);
         s->stat_tsn_headroom_anomaly_logs[s_port]++;
       }
 
@@ -467,8 +450,8 @@ static uint16_t video_trs_burst(struct mtl_main_impl* impl,
         if (s->stat_tsn_last_pkt_logs[s_port] < ST_TSN_STARTUP_TRACE_FRAMES) {
           notice("%s(%d,%d), TSN STARTUP TX_LAST[%u]: frame_idx=%d epoch=%" PRIu64
                  " frame_rtp=%u target_ptp=%" PRIu64 " cur_ptp=%" PRIu64
-                 " delta_ptp_ns=%" PRId64 " target_tsc=%" PRIu64
-                 " cur_tsc=%" PRIu64 " delta_tsc_ns=%" PRId64 "\n",
+                 " delta_ptp_ns=%" PRId64 " target_tsc=%" PRIu64 " cur_tsc=%" PRIu64
+                 " delta_tsc_ns=%" PRId64 "\n",
                  __func__, s->idx, s_port, s->stat_tsn_last_pkt_logs[s_port], frame->idx,
                  frame_epoch, frame_rtp, st_tx_mbuf_get_ptp(tx_pkts[i]), cur_ptp,
                  delta_ptp, st_tx_mbuf_get_tsc(tx_pkts[i]), cur_tsc, delta_tsc);
@@ -476,18 +459,19 @@ static uint16_t video_trs_burst(struct mtl_main_impl* impl,
         } else {
           if (s->stat_tsn_trace_anchor_ptp == 0) s->stat_tsn_trace_anchor_ptp = cur_ptp;
           trace_stable =
-              (cur_ptp >= (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS)) &&
+              (cur_ptp >=
+               (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS)) &&
               (s->stat_tsn_stable_last_pkt_logs[s_port] < ST_TSN_STARTUP_TRACE_FRAMES);
         }
 
         if (trace_stable) {
           notice("%s(%d,%d), TSN STABLE TX_LAST[%u]: frame_idx=%d epoch=%" PRIu64
                  " frame_rtp=%u target_ptp=%" PRIu64 " cur_ptp=%" PRIu64
-                 " delta_ptp_ns=%" PRId64 " target_tsc=%" PRIu64
-                 " cur_tsc=%" PRIu64 " delta_tsc_ns=%" PRId64 "\n",
+                 " delta_ptp_ns=%" PRId64 " target_tsc=%" PRIu64 " cur_tsc=%" PRIu64
+                 " delta_tsc_ns=%" PRId64 "\n",
                  __func__, s->idx, s_port, s->stat_tsn_stable_last_pkt_logs[s_port],
-                 frame->idx, frame_epoch, frame_rtp, st_tx_mbuf_get_ptp(tx_pkts[i]), cur_ptp,
-                 delta_ptp, st_tx_mbuf_get_tsc(tx_pkts[i]), cur_tsc, delta_tsc);
+                 frame->idx, frame_epoch, frame_rtp, st_tx_mbuf_get_ptp(tx_pkts[i]),
+                 cur_ptp, delta_ptp, st_tx_mbuf_get_tsc(tx_pkts[i]), cur_tsc, delta_tsc);
           s->stat_tsn_stable_last_pkt_logs[s_port]++;
         }
       }
@@ -884,10 +868,9 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
       if (s->trs_inflight_num[s_port] > 0) {
         s->stat_tsn_tx_partial++;
         s->stat_tsn_tx_saved_partial_pkts[s_port] += s->trs_inflight_num[s_port];
-        video_trs_tsn_stall_diag(
-            impl, s, s_port, "inflight-partial", ring,
-            &s->trs_inflight[s_port][s->trs_inflight_idx[s_port]],
-            s->trs_inflight_num[s_port] + tx, tx);
+        video_trs_tsn_stall_diag(impl, s, s_port, "inflight-partial", ring,
+                                 &s->trs_inflight[s_port][s->trs_inflight_idx[s_port]],
+                                 s->trs_inflight_num[s_port] + tx, tx);
         video_trs_tsn_note_inflight_peak(s, s_port);
       }
       return MTL_TASKLET_HAS_PENDING;
@@ -947,55 +930,49 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
           int64_t enqueue_to_dequeue_tsc = 0;
 
           if (frame->tsn_debug.first_enqueue_valid[s_port]) {
-            enqueue_to_dequeue_ptp =
-                (int64_t)cur_ptp_for_lt -
-                (int64_t)frame->tsn_debug.first_enqueue_ptp[s_port];
+            enqueue_to_dequeue_ptp = (int64_t)cur_ptp_for_lt -
+                                     (int64_t)frame->tsn_debug.first_enqueue_ptp[s_port];
             enqueue_to_dequeue_tsc =
                 (int64_t)cur_tsc - (int64_t)frame->tsn_debug.first_enqueue_tsc[s_port];
           }
 
           notice("%s(%d,%d), TSN STARTUP DEQ[%u]: frame_idx=%d epoch=%" PRIu64
                  " sync_to_deq_ptp_ns=%" PRId64 " sync_to_deq_tsc_ns=%" PRId64
-                 " enqueue_to_deq_ptp_ns=%" PRId64
-                 " enqueue_to_deq_tsc_ns=%" PRId64
-                 " delta_ptp_ns=%" PRId64 " delta_tsc_ns=%" PRId64
-                 " ring_count=%u\n",
+                 " enqueue_to_deq_ptp_ns=%" PRId64 " enqueue_to_deq_tsc_ns=%" PRId64
+                 " delta_ptp_ns=%" PRId64 " delta_tsc_ns=%" PRId64 " ring_count=%u\n",
                  __func__, s->idx, s_port, s->stat_tsn_startup_dequeue_logs[s_port],
                  frame->idx, frame->tv_meta.epoch,
                  (int64_t)cur_ptp_for_lt - (int64_t)frame->tsn_debug.sync_ptp,
                  (int64_t)cur_tsc - (int64_t)frame->tsn_debug.sync_tsc,
                  enqueue_to_dequeue_ptp, enqueue_to_dequeue_tsc,
-                  (int64_t)st_tx_mbuf_get_ptp(pkts[0]) - (int64_t)cur_ptp_for_lt,
+                 (int64_t)st_tx_mbuf_get_ptp(pkts[0]) - (int64_t)cur_ptp_for_lt,
                  (int64_t)target_tsc - (int64_t)cur_tsc, rte_ring_count(ring));
           s->stat_tsn_startup_dequeue_logs[s_port]++;
         } else if ((cur_ptp_for_lt >=
-                      (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS)) &&
-                     (s->stat_tsn_stable_dequeue_logs[s_port] <
-                      ST_TSN_STARTUP_TRACE_FRAMES)) {
+                    (s->stat_tsn_trace_anchor_ptp + ST_TSN_STABLE_TRACE_DELAY_NS)) &&
+                   (s->stat_tsn_stable_dequeue_logs[s_port] <
+                    ST_TSN_STARTUP_TRACE_FRAMES)) {
           int64_t enqueue_to_dequeue_ptp = 0;
           int64_t enqueue_to_dequeue_tsc = 0;
 
           if (frame->tsn_debug.first_enqueue_valid[s_port]) {
-            enqueue_to_dequeue_ptp =
-                (int64_t)cur_ptp_for_lt -
-                (int64_t)frame->tsn_debug.first_enqueue_ptp[s_port];
+            enqueue_to_dequeue_ptp = (int64_t)cur_ptp_for_lt -
+                                     (int64_t)frame->tsn_debug.first_enqueue_ptp[s_port];
             enqueue_to_dequeue_tsc =
                 (int64_t)cur_tsc - (int64_t)frame->tsn_debug.first_enqueue_tsc[s_port];
           }
 
           notice("%s(%d,%d), TSN STABLE DEQ[%u]: frame_idx=%d epoch=%" PRIu64
-                   " sync_to_deq_ptp_ns=%" PRId64 " sync_to_deq_tsc_ns=%" PRId64
-                   " enqueue_to_deq_ptp_ns=%" PRId64
-                   " enqueue_to_deq_tsc_ns=%" PRId64
-                   " delta_ptp_ns=%" PRId64 " delta_tsc_ns=%" PRId64
-                   " ring_count=%u\n",
-                   __func__, s->idx, s_port, s->stat_tsn_stable_dequeue_logs[s_port],
-                   frame->idx, frame->tv_meta.epoch,
-                   (int64_t)cur_ptp_for_lt - (int64_t)frame->tsn_debug.sync_ptp,
-                   (int64_t)cur_tsc - (int64_t)frame->tsn_debug.sync_tsc,
-                   enqueue_to_dequeue_ptp, enqueue_to_dequeue_tsc,
-                   (int64_t)st_tx_mbuf_get_ptp(pkts[0]) - (int64_t)cur_ptp_for_lt,
-                   (int64_t)target_tsc - (int64_t)cur_tsc, rte_ring_count(ring));
+                 " sync_to_deq_ptp_ns=%" PRId64 " sync_to_deq_tsc_ns=%" PRId64
+                 " enqueue_to_deq_ptp_ns=%" PRId64 " enqueue_to_deq_tsc_ns=%" PRId64
+                 " delta_ptp_ns=%" PRId64 " delta_tsc_ns=%" PRId64 " ring_count=%u\n",
+                 __func__, s->idx, s_port, s->stat_tsn_stable_dequeue_logs[s_port],
+                 frame->idx, frame->tv_meta.epoch,
+                 (int64_t)cur_ptp_for_lt - (int64_t)frame->tsn_debug.sync_ptp,
+                 (int64_t)cur_tsc - (int64_t)frame->tsn_debug.sync_tsc,
+                 enqueue_to_dequeue_ptp, enqueue_to_dequeue_tsc,
+                 (int64_t)st_tx_mbuf_get_ptp(pkts[0]) - (int64_t)cur_ptp_for_lt,
+                 (int64_t)target_tsc - (int64_t)cur_tsc, rte_ring_count(ring));
           s->stat_tsn_stable_dequeue_logs[s_port]++;
         }
       }
@@ -1013,9 +990,52 @@ static int video_trs_launch_time_tasklet(struct mtl_main_impl* impl,
       video_trs_tsn_note_inflight_peak(s, s_port);
       s->stat_tsn_tx_partial++;
       s->stat_tsn_tx_saved_partial_pkts[s_port] += remaining;
-      video_trs_tsn_stall_diag(impl, s, s_port, "fresh-partial", ring,
-                               &pkts[0], valid_bulk, tx);
+      video_trs_tsn_stall_diag(impl, s, s_port, "fresh-partial", ring, &pkts[0],
+                               valid_bulk, tx);
     }
+  }
+
+  /* Inner drain loop: keep submitting while NIC accepts and ring has data.
+   * This avoids returning to the scheduler (and re-running all other tasklets)
+   * between every 32-pkt batch. The loop stops when:
+   *   - NIC ring full (partial burst saved as inflight for next tasklet call)
+   *   - Software ring empty
+   *   - Budget exhausted (cap iterations to avoid starving other tasklets) */
+  unsigned int drain_budget = 128; /* max batches per tasklet invocation */
+  while (drain_budget > 0 && s->trs_inflight_num[s_port] == 0) {
+    drain_budget--;
+    n = mt_rte_ring_sc_dequeue_bulk(ring, (void**)&pkts[0], bulk, NULL);
+    if (n == 0) break;
+
+    valid_bulk = bulk;
+    pkt_idx = 0;
+    for (int i = 0; i < (int)bulk; i++) {
+      pkt_idx = st_tx_mbuf_get_idx(pkts[i]);
+      if (pkt_idx == ST_TX_DUMMY_PKT_IDX) {
+        valid_bulk = i;
+        break;
+      }
+    }
+    if (unlikely(pkt_idx == ST_TX_DUMMY_PKT_IDX)) {
+      rte_pktmbuf_free_bulk(&pkts[valid_bulk], bulk - valid_bulk);
+      s->stat_pkts_burst_dummy += bulk - valid_bulk;
+    }
+    if (valid_bulk > 0) {
+      uint64_t lt_ptp = mt_get_ptp_time(impl, MTL_PORT_P);
+      video_trs_tsn_mark_launch_time(s, inf, &pkts[0], valid_bulk, lt_ptp);
+      tx = video_trs_burst(impl, s, s_port, &pkts[0], valid_bulk);
+      s->stat_tsn_tx_calls++;
+      s->stat_tsn_tx_bulks_sum++;
+      if (tx < valid_bulk) {
+        unsigned int remaining = valid_bulk - tx;
+        video_trs_save_inflight(s, s_port, &pkts[tx], remaining, false);
+        video_trs_tsn_note_inflight_peak(s, s_port);
+        s->stat_tsn_tx_partial++;
+        s->stat_tsn_tx_saved_partial_pkts[s_port] += remaining;
+        break; /* NIC ring full, stop draining */
+      }
+    }
+    if (unlikely(pkt_idx == ST_TX_DUMMY_PKT_IDX)) break; /* frame boundary */
   }
 
   return MTL_TASKLET_HAS_PENDING;

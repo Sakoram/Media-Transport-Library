@@ -3682,6 +3682,13 @@ static int tv_attach(struct mtl_main_impl* impl, struct st_tx_video_sessions_mgr
     s->ring_count = ring_po2;
     info("%s(%d), TSN ring %u (2 * %d pkts, rounded to po2)\n", __func__, idx,
          s->ring_count, s->st20_total_pkts);
+    /* TSN pacing benefits from larger burst batches: the NIC TX descriptor ring
+     * drains at the HW-paced rate, so submitting more packets per rte_eth_tx_burst
+     * call reduces retry overhead when the ring has partial space available. */
+    if (!(ops->flags & ST20_TX_FLAG_DISABLE_BULK)) {
+      s->bulk = RTE_MIN(32, ST_SESSION_MAX_BULK);
+      info("%s(%d), TSN bulk %u\n", __func__, idx, s->bulk);
+    }
   } else {
     while (s->ring_count > s->st20_total_pkts) {
       s->ring_count /= 2;

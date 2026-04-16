@@ -56,8 +56,8 @@ In {{ice_tx_queue_start()}} ({{drivers/net/intel/ice/ice_rxtx.c}}), the TXTIME b
 {noformat}
 txq->qtx_tail = hw->hw_addr + E830_GLQTX_TXTIME_DBELL_LSB(txq->reg_idx);
 
-/* Init the Tx time tail register*/
-ICE_PCI_REG_WRITE(txq->qtx_tail, 0);       /* <--- problematic write */
+/*Init the Tx time tail register*/
+ICE_PCI_REG_WRITE(txq->qtx_tail, 0);       /*<--- problematic write*/
 
 err = ice_aq_set_txtimeq(hw, txq->reg_idx, 1, ts_elem, ts_buf_len, NULL);
 {noformat}

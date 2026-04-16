@@ -32,7 +32,7 @@
 
 #define ST_SCH_MAX_TX_VIDEO_SESSIONS (60) /* max video tx sessions per sch lcore */
 #define ST_SCH_MAX_RX_VIDEO_SESSIONS (60) /* max video rx sessions per sch lcore */
-#define ST_SESSION_MAX_BULK (4)
+#define ST_SESSION_MAX_BULK (32)
 #define ST_TX_VIDEO_SESSIONS_RING_SIZE (512)
 #define ST_TSN_STARTUP_TRACE_FRAMES (40)
 #define ST_TSN_STABLE_TRACE_DELAY_NS (20ULL * NS_PER_S)

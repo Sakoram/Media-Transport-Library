@@ -29,6 +29,7 @@ sudo ./builddir/txtime_test -l 0-1 \
 ```
 
 **Debug mask bits** (from `ice_type.h`):
+
 | Bit | Constant | What it logs |
 |-----|----------|-------------|
 | `0x04000000` | `ICE_DBG_AQ_DESC` | AQ descriptor (opcode, flags, params) |
@@ -788,6 +789,7 @@ txq->qtx_tail = hw->hw_addr + E830_GLQTX_TXTIME_DBELL_LSB(txq->reg_idx);
 ```
 
 **Test results** (two independent runs, identical results):
+
 | Test | Description | Result |
 |------|-------------|--------|
 | Test 0 | Sanity (no TXTIME) | opackets=3 ✅ |

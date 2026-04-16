@@ -22,15 +22,15 @@ echo ""
 
 # Check interface exists
 if ! ip link show "$IFACE" &>/dev/null; then
-    echo "ERROR: Interface $IFACE not found"
-    exit 1
+	echo "ERROR: Interface $IFACE not found"
+	exit 1
 fi
 
 # Check it's using ice driver
 DRIVER=$(basename "$(readlink /sys/class/net/$IFACE/device/driver 2>/dev/null)" 2>/dev/null)
 echo "Driver: $DRIVER"
 if [ "$DRIVER" != "ice" ]; then
-    echo "WARNING: $IFACE is not using ice driver (got: $DRIVER)"
+	echo "WARNING: $IFACE is not using ice driver (got: $DRIVER)"
 fi
 
 # Bring up interface and assign IP
@@ -48,16 +48,16 @@ tc qdisc del dev "$IFACE" root 2>/dev/null || true
 
 # Try direct ETF qdisc first (simplest approach)
 if tc qdisc add dev "$IFACE" root etf clockid CLOCK_TAI delta 500000 offload 2>/dev/null; then
-    echo "ETF qdisc added (direct root)"
+	echo "ETF qdisc added (direct root)"
 else
-    echo "Direct ETF failed, trying with mqprio parent..."
-    # Fallback: use mqprio as root, ETF as child
-    tc qdisc add dev "$IFACE" root handle 100: mqprio \
-        num_tc 1 map 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
-        queues 1@0 hw 0
-    tc qdisc add dev "$IFACE" parent 100:1 etf \
-        clockid CLOCK_TAI delta 500000 offload
-    echo "ETF qdisc added (under mqprio)"
+	echo "Direct ETF failed, trying with mqprio parent..."
+	# Fallback: use mqprio as root, ETF as child
+	tc qdisc add dev "$IFACE" root handle 100: mqprio \
+		num_tc 1 map 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 \
+		queues 1@0 hw 0
+	tc qdisc add dev "$IFACE" parent 100:1 etf \
+		clockid CLOCK_TAI delta 500000 offload
+	echo "ETF qdisc added (under mqprio)"
 fi
 
 # Verify

@@ -443,6 +443,7 @@ txq->qtx_tail = hw->hw_addr + E830_GLQTX_TXTIME_DBELL_LSB(txq->reg_idx);
 ## 11. Diagnostic Cheat Sheet
 
 ### Key registers to read
+
 | Register | Address | What it tells you |
 |----------|---------|-------------------|
 | `QTX_COMM_HEAD(q)` | `0x0E4000+q*4` | Data queue HEAD — advances when packets transmit |
