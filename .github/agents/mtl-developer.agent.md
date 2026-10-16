@@ -69,6 +69,9 @@ Open your reply with a **"Context I established"** block stating:
 - **KB section / instructions consulted** — link or "none applies".
 - **Invariants touched** — tasklet vs control-plane, lock ordering, lifetimes, call frequency.
 
+For the unified API, `doc/unified-api/` is the specification. Before any code, read the sections your task card names (`implementation-plan.md` §5.2.2, and §5.8 for what a card holds) and the header of every public symbol you touch, and list them under "KB section / instructions consulted".
+Implement what they say. Where the code or your judgement disagrees with them, the documents win: report the disagreement to your caller, and do not redesign on your own.
+
 If you cannot fill these from your own context, delegate to **Explore** (medium thoroughness) before writing code.
 
 ### Gate 2 — Failing test (test-first)

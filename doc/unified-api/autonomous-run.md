@@ -79,6 +79,17 @@ flowchart TB
   evidence, the decisions taken, and what is blocked. The leads of MS1–MS3 also run the
   Kubernetes track in their second developer slot, EK1, EK2, EK6 and EK7 first, with its rows in
   their own ledger. The EK rows still open at the MS3 exit move to the MS4a1 lead.
+- **The lead knows the design.** It is the one who knows `doc/unified-api/`, because every agent
+  it starts sees only what its prompt names. Before its first task, and again after a hand-off, it
+  reads README §1's "Read first" list (about 39 k tokens: the plan's process and MS1 sections,
+  core.md §1–§3, engine.md §1.2 and §1.4, the rules of `mtl.h`), and for a later milestone that
+  milestone's part of implementation-plan.md §6 and coverage.md §6. For each task it reads the
+  card and the sections the card names itself, and writes the developer's prompt from the card
+  (implementation-plan.md §5.8: goal, files, the sections to read, the G-ids and their §8.2 rows,
+  the tests, the exit command). It gives the reviewer and the designers the same sections, and it
+  checks that the developer's "Context I established" lists them before it accepts the work. When
+  a developer reports that the code and the documents disagree, the lead settles it by the
+  documents, or by §4.
 - **A milestone after MS1** starts with its ledger. Its lead creates `msN-status.md` with the
   shape of [ms1-status.md](ms1-status.md). §1 gets one row per task: the task tables of
   implementation-plan.md §6, and each bullet there without a task as one or more tasks under the
@@ -361,9 +372,10 @@ Each lead (`general-purpose`, `model: "opus"`, `run_in_background: true`) gets:
 You are the lead of <milestone> in the autonomous unified API run. Nobody answers questions.
 The design in doc/unified-api/ is the foundation: every task follows its card and the sections
 it names; when the plan breaks, design alternatives carefully (autonomous-run.md §1, §4).
-Read doc/unified-api/autonomous-run.md, README.md §1, run-status.md and <ledger>, then
-git status and git log --oneline -20, and resume from the ledger. You are "the main session"
-of implementation-plan.md. Pass model "opus" on every Agent call that needs thinking (§6), and
-wait for your agents (§2 "Waiting"). Commit and push each review unit (§5). Hand off by §2
-"Hand-off". Report in under 300 words.
+Read doc/unified-api/autonomous-run.md, README.md §1 and its "Read first" list, run-status.md
+and <ledger>, then git status and git log --oneline -20, and resume from the ledger. You are the
+one who knows the design: give every agent you start the sections its task card names (§2). You
+are "the main session" of implementation-plan.md. Pass model "opus" on every Agent call that
+needs thinking (§6), and wait for your agents (§2 "Waiting"). Commit and push each review unit
+(§5). Hand off by §2 "Hand-off". Report in under 300 words.
 ```
