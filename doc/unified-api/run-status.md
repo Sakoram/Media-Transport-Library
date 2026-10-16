@@ -22,8 +22,9 @@ base commit.
 
 ## 2. Milestones
 
-States: todo, in progress, exit review, done, done with exceptions (autonomous-run.md §4). The agent column holds the ID of the running lead, for SendMessage on
-resume. A milestone starts when the one in Needs is done or done with exceptions.
+States: todo, in progress, exit review, done, done with exceptions (autonomous-run.md §4). The
+agent column holds the ID of the running lead, for SendMessage on resume. A milestone starts when
+the one in Needs is done or done with exceptions.
 
 | Milestone | Ledger | Needs | State | Lead agent | Exit commit | Exit evidence |
 |---|---|---|---|---|---|---|
