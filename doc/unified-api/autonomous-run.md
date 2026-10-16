@@ -8,6 +8,14 @@
 
 ## 1. The goal
 
+**Build on the documents.** The design in `doc/unified-api/` is the product of many rounds of
+competing designs, adversarial reviews and models: the headers, contract.md, core.md,
+wait-protocol.md, timing.md, engine.md, the plan and its task cards. Every task starts from its
+card and the sections the card names, and implements what they say. Do not re-derive, simplify or
+replace the design from the code or from first principles. When the plan breaks (a bug, a
+contradiction, a fact that does not hold), spend real time on alternatives before changing
+anything: §4 is the procedure, and a well-designed fix is worth more than a fast one.
+
 The run implements every milestone of [implementation-plan.md](implementation-plan.md) §1.2 in
 order (MS1, MS2a, MS2b, MS3, MS4a1, MS4a2, MS4b, MS5, MS6, MS7), with the Kubernetes track
 (implementation-plan.md §6.8) beside them. Each milestone ends when its exit criteria pass on this
@@ -114,31 +122,30 @@ flowchart TB
 | nights, a nightly, burn-in | counted in runs, not days: see **Nightlies** below. Gate 6 runs and measurements never run at the same time |
 | a measurement on a quiet host | it runs on the E810 and NUMA node 1 (§8), only while no developer task, build or Gate 6 runs. A metric that fails the A/A rule after one rerun goes to the judge of §4, who decides on the evidence how the gate reads it on this host; it is not rerun again |
 | a CI job, a nightly workflow, a pull request of the maintainer's (H1b, P1, implementation-plan.md §5.6), a runner or a NIC this host lacks (Arm, Windows, E835) | the same commands run locally, and their output is the evidence; see **Missing here** below |
-| the Claude Code session restarts after P0 | the run does not restart; see **After P0** below |
+| P0's configuration diffs and the session restart after P0 | done before the run, with the maintainer (2026-10-16): the agent rules, the MCP parameters, the frozen-tree and unified `CLAUDE.md` files and the instructions are committed, and the run's session loads them at its start. The run does P0's histogram and perf scripts; see **After P0** below |
 | a release or a person outside the run: the MS7 external review and the questionnaire, the release targets of OI-75, the deprecation releases, the EBU LIST server | goes to [run-status.md](run-status.md) §4. The run prepares everything up to the hand-off, and continues with the next item that does not depend on it |
 
 **Nightlies.** A nightly is one `sudo -E .github/scripts/gtest.sh` with `--api both` (`--api both` from
 H1b part 3; there is no `task` binary here) plus one nightly pytest pass over both applications, on one NIC. Burn-in is
-ten consecutive nightlies without a "regression" row, on the E830, alternating with the E810 once
-`gtest.sh` can select it. MS2a's
+ten consecutive nightlies without a "regression" row, alternating the E830 and the E810
+(`MTL_GTEST_PF=0000:c9:00.0` selects the E810). MS2a's
 "two weeks of nightlies" is 14 consecutive nightlies, blocking and green. A case that resets a
 count twice goes to §4 as a flake. A nightly runs alone: `gtest.sh` kills every `KahawaiTest` on
 the host at its start, after each failed case and at its end (`gtest.sh` `kill_test_processes`),
 and its NoCtx cases isolate CPUs, so no Gate 6, measurement or other test runs beside it.
-`gtest.sh` takes no port option and runs the first PF with four vfio-pci VFs, the E830 here. A NIC
-option for it is a plan bug for §4 at H1b part 3, which changes `gtest.sh` anyway. Until then the
-`gtest.sh` part of a criterion that names the E810 runs on the E830, and the same filters run on
-the E810 through `run_gtest`; both results are recorded.
+`gtest.sh` runs the first PF with four vfio-pci VFs, the E830 here, unless `MTL_GTEST_PF=<pf>`
+selects another: `sudo -E MTL_GTEST_PF=0000:c9:00.0 .github/scripts/gtest.sh` runs on the E810.
 
 **Missing here.** What only a missing runner, NIC or GitHub can show goes to
 [run-status.md](run-status.md) §4. A missing tool is installed under `~/.local` without `apt`
 where possible; otherwise it goes to §4 too.
 
-**After P0.** From P0's commit on, every prompt to `mtl-developer`, `mtl-reviewer` and
-`mtl-system-admin` starts with: "Read `.github/claude/agents/<name>.md` first; where it differs
-from your loaded instructions, it wins." A Gate 6 that needs what P0 adds runs the binary from the
-lead's shell (`sudo build/tests/UnifiedKahawaiTest --p_port … --r_port … --auto_start_stop …`) and
-quotes its output.
+**After P0.** Only P0's code is left to the run: the scheduler histogram (`mtl-developer`, reviewed
+like a code task) and the S0 perf scripts. A later change to an agent file or the MCP server takes
+effect for the next agent call (agent files) or after `/mcp` reconnects the server; until then the
+prompt to the agent says what changed. A Gate 6 that needs `binary=unified` before it works runs
+the binary from the lead's shell (`sudo build/tests/UnifiedKahawaiTest --p_port … --r_port …
+--auto_start_stop …`) and quotes its output.
 
 ## 4. Questions and plan bugs
 
@@ -148,10 +155,12 @@ misdescribes. Taste is not a bug.
 
 1. **Look it up.** The lead (or an Explore agent) searches the documents. If the plan answers it,
    follow the plan.
-2. **Design.** If the plan doesn't answer it, or the item is wrong, start two or three designers
-   in parallel (Opus 5.5). Each gets the same problem, constraints and test oracle, and is told
-   the others' directions so their approaches differ. Each must prove its proposal with a failing
-   test, a model run or a measurement.
+2. **Design.** If the plan doesn't answer it, or the item is wrong, start at least three designers
+   in parallel (Opus 5.5), more when the change touches the core, waiting, timing or the public
+   headers. Each gets the same problem, the documents that constrain it, and the test oracle, and
+   is told the others' directions so their approaches differ. Each must prove its proposal with a
+   failing test, a model run or a measurement, and say what in the design it keeps and what it
+   changes. Take the time this needs: a question waits for a good answer while other tasks go on.
 3. **Judge.** One adversarial reviewer (Opus 5.5) compares the candidates on the same evidence
    and picks one, a merge or none. It then tries to break the pick. The smallest change that
    fixes the bug wins; never widen a milestone's scope.
@@ -216,12 +225,14 @@ orchestrator writes the final report and stops.
   and settings. A rejected commit is fixed, never forced through. When `checkpatch` reformats a
   file, review the change, stage it and commit again. Never run `checkpatch.sh --install-hooks` or
   `pre-commit install`: they replace the guards.
-- **A denied call.** A call that a permission rule, the classifier or a hook refuses is not
-  retried in another form or through another tool. The agent saves what the call would have done
-  under `/home/labrat/wip/unified-api-impl/denied/`, and the lead adds a row to
+- **A denied call.** The session runs in `dontAsk` mode (§9): a call that matches no allow rule is
+  denied, never prompted. Such a call may be rephrased into an allowed form when its intent is
+  allowed: split a compound command, use an absolute path or `git -C` instead of a `cd` out of the
+  repository, use a listed tool. A call refused by a deny rule, the classifier or a guard is never
+  retried in another form or through another tool. The agent saves what it would have done under
+  `/home/labrat/wip/unified-api-impl/denied/`, and the lead adds a row to
   [run-status.md](run-status.md) §4 with the call and its purpose, then continues with the next
-  item that does not need it. For P0's config files the text goes into the agent prompts instead
-  (§3).
+  item that does not need it.
 - **Docs stay true.** A commit that changes what a document says passes
   `doc/unified-api/sketch/check.sh`, and from H1b the exit command of implementation-plan.md §5.8.
 
@@ -273,7 +284,7 @@ The state when the run was prepared (2026-10-16):
 | | |
 |---|---|
 | E810 | Intel E810-C, PFs `0000:c9:00.0` (VFs `0000:c9:01.0`–`.5`) and `0000:c9:00.1` (VFs `0000:c9:11.0`–`.5`), NUMA node 1, PTP clock `/dev/ptp1`, patched ICE driver `Kahawai_2.6.7`. The plan's NIC: Gate 6 of data-plane tasks, the measurements (one PF per leg, implementation-plan.md §8.4), and every criterion that names E810 |
-| E830 | Intel E830-CC, PFs `0000:15:00.0` (VFs `0000:15:01.0`–`.5`) and `0000:15:00.1` (VFs `0000:15:11.0`–`.5`), NUMA node 0, PTP clock `/dev/ptp0`. Milestone exits run on it as well. `run_gtest` picks it unless given `p_port` and `r_port` (and a `timeout_seconds` above the suite's length). `gtest.sh` has no port option and always runs it (see **Nightlies**) |
+| E830 | Intel E830-CC, PFs `0000:15:00.0` (VFs `0000:15:01.0`–`.5`) and `0000:15:00.1` (VFs `0000:15:11.0`–`.5`), NUMA node 0, PTP clock `/dev/ptp0`. Milestone exits run on it as well. `run_gtest` picks it unless given `p_port` and `r_port` (and a `timeout_seconds` above the suite's length). `gtest.sh` picks it unless `MTL_GTEST_PF` names another PF (see **Nightlies**) |
 | CPUs | 256 threads; node 0 is CPUs 0–63 and 128–191, node 1 is 64–127 and 192–255. Governor `performance`. No boot-time isolation (`isolcpus`, `nohz_full`); THP `madvise` |
 | Memory | 2 MB hugepages, 1024 on each NUMA node; no 1 GB pages |
 | Root | `sudo` works without a password |
@@ -310,40 +321,30 @@ not evidence.
 
 **Before the first start**, the maintainer:
 
-1. creates `.github/claude/settings.local.json` with the guard (the auto-mode classifier refuses
-   to let a session write it):
-
-   ```json
-   {
-     "permissions": { "deny": ["AskUserQuestion"] },
-     "hooks": {
-       "PreToolUse": [
-         {
-           "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion",
-           "hooks": [
-             { "type": "command",
-               "command": "python3 -I /home/labrat/mtl-2/.git/autonomous-run/bash-guard.py || exit 2" }
-           ]
-         }
-       ]
-     }
-   }
-   ```
-
+1. copies `/home/labrat/wip/unified-api-impl/settings/settings.local.candidate.json` to
+   `.github/claude/settings.local.json` (gitignored), unless it is already there. It sets
+   `defaultMode` to `dontAsk`, allows what the run uses (the shell tools, the build and test
+   commands, `sudo`, git, the MCP servers, agents, edits of this repository and of the scratch
+   directories), denies the rest of §5 (pushes other than to the fork, GitHub writes, reboots,
+   `apt`, reading the credential files, editing the guards, other clones), and runs the guard on
+   every Bash, Edit, Write and `AskUserQuestion` call, blocking when the guard fails. Then
+   `/home/labrat/wip/unified-api-impl/settings/test-permissions.sh` runs a headless `dontAsk`
+   session over harmless allowed and forbidden actions and prints the result;
 2. starts Claude Code interactively in tmux, from `/home/labrat/mtl-2` on `unified-api-impl`, with
-   `claude --permission-mode bypassPermissions`. Auto mode's classifier may refuse edits of agent
-   definitions and settings, which P0 needs, and stall the run. The deny rule and the hooks
-   hold in every mode.
+   `claude`: the settings give `dontAsk`, so nothing prompts and `bypassPermissions` is not
+   needed. Deny rules and hooks hold in subagents too.
 
 The orchestrator's first act is a guard check: `env | wc -l` must be blocked, and so must a
-subagent's `git push origin x` and a Write to `.git/hooks/x`. If any of them passes, it records
-that in [run-status.md](run-status.md) §1 and stops.
+subagent's `git push origin x` and a Write to `.git/hooks/x`; `git status`, a `for` loop over two
+files, `sudo -n true` and the MCP tool `hugepages_get` must run. If one of them goes the wrong way,
+it records that in [run-status.md](run-status.md) §1 and stops.
 
 The orchestrator's prompt, which also restarts the run after an interruption:
 
 ```text
 You are the orchestrator of the autonomous unified API run. Nobody will answer questions.
-Read doc/unified-api/autonomous-run.md, then doc/unified-api/run-status.md, and follow them
+The design in doc/unified-api/ is the foundation: build on it, and when the plan breaks,
+design alternatives carefully (autonomous-run.md §1, §4). Read doc/unified-api/autonomous-run.md, then doc/unified-api/run-status.md, and follow them
 until run-status.md §5 (the final report) is written: check the guards, then resume or start
 the next lead, verify the evidence of its report, record it and push. Beyond those two files
 never read code or whole documents yourself; delegate. Never stop a working agent.
@@ -353,6 +354,8 @@ Each lead (`general-purpose`, `model: "opus"`, `run_in_background: true`) gets:
 
 ```text
 You are the lead of <milestone> in the autonomous unified API run. Nobody answers questions.
+The design in doc/unified-api/ is the foundation: every task follows its card and the sections
+it names; when the plan breaks, design alternatives carefully (autonomous-run.md §1, §4).
 Read doc/unified-api/autonomous-run.md, README.md §1, run-status.md and <ledger>, then
 git status and git log --oneline -20, and resume from the ledger. You are "the main session"
 of implementation-plan.md. Pass model "opus" on every Agent call that needs thinking (§6), and

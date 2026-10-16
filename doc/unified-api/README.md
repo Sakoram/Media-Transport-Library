@@ -40,6 +40,12 @@ Example IDs (ex21) and the section numbers of [examples.md](examples.md) (§23) 
 
 ## 1. For the implementing session
 
+**Build on these documents.** They are the product of many rounds of competing designs, adversarial
+reviews and models, and they are the specification of the work: each task implements its card
+and the sections the card names. Do not re-derive or replace the design from the code. When the
+plan breaks, spend real time designing alternatives, by the procedure of
+[autonomous-run.md](autonomous-run.md) §4, before changing it.
+
 The work is done by a main session that plans and integrates, and by the repository's subagents:
 `mtl-developer` writes code and tests for one task (Gates 0–4), `mtl-reviewer` reviews every saved
 diff (Gate 5), `mtl-system-admin` runs KahawaiTest on VFs (Gate 6); pytest runs from the main
