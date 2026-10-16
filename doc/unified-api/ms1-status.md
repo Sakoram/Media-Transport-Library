@@ -34,7 +34,7 @@ evidence names the tests and quotes the Gate 6 output.
 
 | Task | State | Branch | Commit | Gate evidence (Gates 2, 4, 5, 6) | Open questions |
 |---|---|---|---|---|---|
-| P0 | todo | | | | |
+| P0 | in progress: the configuration half was done with the maintainer before the run (2026-10-16); the histogram and the S0 perf scripts remain | unified-api-impl | | | `run_gtest` reports "Total: 0" when a single test ran: fix with the histogram commit |
 | M0 (docs, design branch) | todo | | | | |
 | S0 | todo | | | | |
 | T1 | todo | | | | |
@@ -51,7 +51,7 @@ evidence names the tests and quotes the Gate 6 output.
 | A2a (series of 2) | todo | | | | |
 | A2c (series of 2) | todo | | | | |
 | I1 | todo | | | | |
-| R1 | todo | | | | |
+| R1 | todo | | | | Once R1 installs `UnifiedRxTxApp`, make it required in `vd_local_install_ready` (`.github/scripts/lib/mtl_acceptance_discover.sh`); P0 only reports it |
 | P1 | todo | | | | |
 | A2b (stretch, committed in MS2a) | todo | | | | |
 | B3 (stretch, committed in MS2a) | todo | | | | |

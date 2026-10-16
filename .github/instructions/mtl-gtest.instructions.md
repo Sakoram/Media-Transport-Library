@@ -1,6 +1,6 @@
 ---
 description: "Running, debugging, and interpreting MTL integration tests (gtest / KahawaiTest). Covers test binaries, CLI flags, test suites, pacing modes, and failure patterns."
-applyTo: "tests/integration_tests/**,.github/scripts/gtest.sh"
+applyTo: "tests/integration_tests/**,tests/unified_integration_tests/**,.github/scripts/gtest.sh"
 ---
 
 # MTL Integration Tests (gtest) — Agent Instructions

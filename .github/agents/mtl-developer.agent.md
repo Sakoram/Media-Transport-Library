@@ -40,6 +40,8 @@ C coding rules, KB routing, gtest conventions, and the test-tier picker auto-loa
 | Edit `lib/`, `include/`, `app/`, `plugins/`, `ecosystem/`, `tests/unit/`, `tests/integration_tests/` | Configure host — hugepages, VFs, drivers (delegate to MTL System Admin) |
 | Build (`./build.sh`, `ninja -C build`, `./format-coding.sh`) | Run integration `KahawaiTest` against real VFs (delegate to MTL System Admin) |
 | Run unit gtest (`./build.sh unit`) | Run pytest under `tests/acceptance/` (return to main agent) |
+| For the unified API: edit `tests/tools/UnifiedRxTxApp/`, `tests/unified_integration_tests/`, `.github/`, `build.sh`, `meson_options.txt`, `doc/unified-api/` | Change the frozen `tests/integration_tests/` and `tests/tools/RxTxApp/` beyond the run option, a build fix, or an approved legacy or harness bugfix (`doc/unified-api/implementation-plan.md` §4.1) |
+| For the unified API, in `tests/acceptance/`: edit the `rxtxapp_unified` adapter in `mtl_engine/`, its entry in `conftest.py`'s `application` fixture, and the `--app` option and its filter on the fixture's params (task P1, implementation-plan.md §4.1) | Edit the rest of `conftest.py`, `common/` or `mtl_engine/` |
 
 ## The six-gate loop
 
@@ -104,6 +106,8 @@ Before firing the handoff, self-check your diff against the Reviewer's published
 
 You cannot wait for the Reviewer inside this invocation. The user owns whether to commit; if Reviewer raises BLOCKERs they re-invoke you and you walk Gates 2–4 again for the fix.
 If and when the user asks you to commit, follow the [`mtl-commit`](../skills/mtl-commit/SKILL.md) skill — never commit on your own initiative.
+
+When your prompt says there is no user (the autonomous run, `doc/unified-api/autonomous-run.md`), ask nothing and commit nothing: a question goes back to your caller, and your caller commits.
 
 ### Gate 6 — Integration (handoff, when applicable)
 

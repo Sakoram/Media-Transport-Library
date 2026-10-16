@@ -24,6 +24,7 @@ decision logic and domain knowledge that tool descriptions alone don't convey.
 ### "Run integration tests"
 1. Verify prerequisites **before** the first `run_gtest` call: `dpdk_devbind_status` (ports bound as VFs, not bare PFs — see below), MtlManager running (`manager_start` if not).
 2. `run_gtest` with appropriate `gtest_filter` (e.g. `St20p*`, `St30*`)
+   - Options beyond the filter (pacing, `kernel:<if>` ports, the unified binary): see "Test tool parameters" below.
 3. If tests segfault → see "Test crashed" below
 4. If RX session creation fails with multicast-join/IGMP errors → see "Multicast join / IGMP failure" below
 5. Report pass/fail counts
@@ -59,3 +60,12 @@ decision logic and domain knowledge that tool descriptions alone don't convey.
 - **NUMA**: Allocate from the same NUMA node as the NIC for best performance. VFs inherit PF's NUMA node.
 - **VF BDF patterns**: PF `.0` creates VFs at `:01.0-5`, PF `.1` at `:11.0-5`.
 - **versions.env**: Defines `DPDK_VER`, `ICE_VER`, `ICE_DMID`. Patches live in `patches/dpdk/<ver>/`.
+
+### Test tool parameters
+
+- **`binary`** (`run_gtest`, `run_noctx_tests`, `run_noctx_pf_tests`): `legacy` (default, `build/tests/KahawaiTest`) or `unified` (`build/tests/UnifiedKahawaiTest`). A missing unified binary is an error naming its path; the tools never fall back from one binary to the other.
+- **`run_gtest` `level`**: `all` or `mandatory`. Non-mandatory cases report PASS at 0 ms without `all`.
+- **`run_gtest` `pacing_way`**: `auto`, `rl`, `tsn`, `tsc`, `ptp` or `be` (binary default `auto`).
+- **`run_gtest` `extra_args`**: further KahawaiTest options, whitespace-separated, from a whitelist only: `--pacing_way <auto|rl|tsn|tsc|ptp|be>`, `--level <all|mandatory>`, `--rss_mode <l3|l3_l4|none>`, `--iova_mode <va|pa>`, `--multi_src_port`, `--p_sip <IPv4>`. Values are validated; any other option is refused.
+  The nightly variants of `.github/scripts/gtest.sh` map to e.g. `pacing_way="tsc", extra_args="--rss_mode l3_l4 --iova_mode va --multi_src_port"`.
+- **Kernel socket ports**: `run_gtest(p_port="kernel:lo", r_port="kernel:lo", extra_args="--p_sip 192.168.10.1")`. A `kernel:<if>` port needs `--p_sip`; the other tools take BDFs only.

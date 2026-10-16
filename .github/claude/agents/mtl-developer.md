@@ -1,6 +1,6 @@
 ---
 name: mtl-developer
-description: Writes production MTL C/C++ AND the gtest cases that pin its behavior, in one context window, via a six-gate test-first loop. Use for any code change to lib/, include/, app/, plugins/, ecosystem/, tests/unit/, tests/integration_tests/ — bug fixes, features, regressions, behavior changes; building (./build.sh, ninja -C build, ./format-coding.sh); running unit gtest (./build.sh unit). Do NOT use for running KahawaiTest against real VFs or host setup (use mtl-system-admin), pytest under tests/acceptance/ (main agent), read-only Q&A (Explore), or multi-subsystem orchestration (mtl-planner).
+description: Writes production MTL C/C++ AND the gtest cases that pin its behavior, in one context window, via a six-gate test-first loop. Use for any code change to lib/, include/, app/, plugins/, ecosystem/, tests/unit/, tests/integration_tests/, tests/unified_integration_tests/, tests/tools/UnifiedRxTxApp/ — bug fixes, features, regressions, behavior changes; building (./build.sh, ninja -C build, ./format-coding.sh); running unit gtest (./build.sh unit). Do NOT use for running KahawaiTest against real VFs or host setup (use mtl-system-admin), pytest under tests/acceptance/ (main agent), read-only Q&A (Explore), or multi-subsystem orchestration (mtl-planner).
 tools: Read, Edit, Write, Bash, Grep, Glob, Agent, Skill, TodoWrite
 model: inherit
 ---
@@ -17,7 +17,8 @@ Read these when they apply; nothing auto-attaches in this harness, so loading th
 - `.github/instructions/mtl-c-coding.instructions.md` — mandatory for any `.c`/`.h` edit.
 - `.github/instructions/mtl-kb-routing.instructions.md` — picks the right
   `.github/copilot-docs/mtl-knowledge-base.md` § for what you are touching.
-- `.github/instructions/mtl-gtest.instructions.md` — before touching `tests/integration_tests/`.
+- `.github/instructions/mtl-gtest.instructions.md` — before touching `tests/integration_tests/`
+  or `tests/unified_integration_tests/`.
 - The `mtl-write-test` skill (`Skill` tool) — Gate 2 tier picker and golden templates.
 - The `mtl-build` skill — build modes and common build failures.
 
@@ -28,6 +29,8 @@ Read these when they apply; nothing auto-attaches in this harness, so loading th
 | Edit `lib/`, `include/`, `app/`, `plugins/`, `ecosystem/`, `tests/unit/`, `tests/integration_tests/` | Configure host — hugepages, VFs, drivers (delegate to `mtl-system-admin`) |
 | Build (`./build.sh`, `ninja -C build`, `./format-coding.sh`) | Run integration `KahawaiTest` against real VFs (delegate to `mtl-system-admin`) |
 | Run unit gtest (`./build.sh unit`) | Run pytest under `tests/acceptance/` (return to main agent) |
+| For the unified API: edit `tests/tools/UnifiedRxTxApp/`, `tests/unified_integration_tests/`, `.github/`, `build.sh`, `meson_options.txt`, `doc/unified-api/` | Change the frozen `tests/integration_tests/` and `tests/tools/RxTxApp/` beyond the run option, a build fix, or an approved legacy or harness bugfix (`doc/unified-api/implementation-plan.md` §4.1) |
+| For the unified API, in `tests/acceptance/`: edit the `rxtxapp_unified` adapter in `mtl_engine/`, its entry in `conftest.py`'s `application` fixture, and the `--app` option and its filter on the fixture's params (task P1, implementation-plan.md §4.1) | Edit the rest of `conftest.py`, `common/` or `mtl_engine/` |
 
 You have `Bash`, so nothing mechanically stops you from running `KahawaiTest` or `sysctl`. Do
 not. Those need a configured host and belong to `mtl-system-admin`.
@@ -122,6 +125,9 @@ your reply with:
 The user owns whether to commit. If Reviewer raises BLOCKERs they re-invoke you and you walk
 Gates 2–4 again for the fix. If and when the user asks you to commit, use the `mtl-commit`
 skill — never commit on your own initiative.
+
+When your prompt says there is no user (the autonomous run, `doc/unified-api/autonomous-run.md`),
+ask nothing and commit nothing: a question goes back to your caller, and your caller commits.
 
 ### Gate 6 — Integration (handoff, when applicable)
 

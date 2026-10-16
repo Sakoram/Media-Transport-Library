@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import subprocess  # nosec B404 # tool args are validated before reaching a shell
@@ -83,11 +84,101 @@ mcp = FastMCP(
 # Helpers local to this server (NIC/VF discovery — not needed by the
 # acceptance-tests server, so not shared via mtl_setup_common)
 # ---------------------------------------------------------------------------
-def _validate_bdf(bdf: str) -> str | None:
-    """Return error string if BDF is invalid, else None."""
+def _validate_bdf(bdf: str, allow_kernel: bool = False) -> str | None:
+    """Return error string if BDF is invalid, else None.
+
+    With allow_kernel, a kernel socket port `kernel:<if>` (e.g. kernel:lo) is
+    accepted too.
+    """
+    if allow_kernel and re.match(r"^kernel:[a-zA-Z0-9_.-]{1,15}$", bdf):
+        return None
     if not re.match(r"^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.\d$", bdf):
+        if allow_kernel:
+            return (
+                f"Error: invalid port '{bdf}'. Expected a BDF (0000:af:00.0) "
+                "or kernel:<if> (kernel:lo)"
+            )
         return f"Error: invalid BDF format '{bdf}'. Expected format: 0000:af:00.0"
     return None
+
+
+# The integration test binaries the run_* tools can run (`binary` argument).
+_TEST_BINARIES = {"legacy": "KahawaiTest", "unified": "UnifiedKahawaiTest"}
+
+
+def _test_binary(binary: str) -> tuple[Path | None, str]:
+    """Return (path, "") of the test binary `binary` names, else (None, error)."""
+    name = _TEST_BINARIES.get(binary)
+    if name is None:
+        return None, "Error: binary must be 'legacy' or 'unified'"
+    path = REPO_ROOT / "build/tests" / name
+    if path.is_file():
+        return path, ""
+    if binary == "unified":
+        return None, (
+            f"Error: {path} does not exist. binary='unified' runs UnifiedKahawaiTest "
+            "only and never falls back to KahawaiTest; build it first."
+        )
+    return None, "Error: KahawaiTest not built. Run `build_mtl` first."
+
+
+_PACING_WAYS = ("auto", "rl", "tsn", "tsc", "ptp", "be")
+
+# The KahawaiTest options run_gtest passes through `extra_args`, and the values
+# each takes: a tuple of choices, () for a flag without a value, None for an
+# IPv4 address.
+_GTEST_EXTRA_ARGS: dict[str, tuple[str, ...] | None] = {
+    "--pacing_way": _PACING_WAYS,
+    "--level": ("all", "mandatory"),
+    "--rss_mode": ("l3", "l3_l4", "none"),
+    "--iova_mode": ("va", "pa"),
+    "--multi_src_port": (),
+    "--p_sip": None,
+}
+
+
+def _parse_gtest_extra_args(extra_args: str) -> tuple[dict[str, str], str]:
+    """Parse whitespace-separated `--opt value`, `--opt=value` or `--flag` items.
+
+    Returns ({option: value}, "") with "" as the value of a flag, or ({}, error).
+    """
+    parsed: dict[str, str] = {}
+    tokens = extra_args.split()
+    allowed = ", ".join(_GTEST_EXTRA_ARGS)
+    i = 0
+    while i < len(tokens):
+        opt, has_eq, value = tokens[i].partition("=")
+        i += 1
+        if opt not in _GTEST_EXTRA_ARGS:
+            return (
+                {},
+                f"Error: extra_args option '{opt}' not allowed. Allowed: {allowed}",
+            )
+        if opt in parsed:
+            return {}, f"Error: extra_args option '{opt}' given twice"
+        choices = _GTEST_EXTRA_ARGS[opt]
+        if choices == ():
+            if has_eq:
+                return {}, f"Error: extra_args option '{opt}' takes no value"
+            parsed[opt] = ""
+            continue
+        if not has_eq:
+            if i >= len(tokens):
+                return {}, f"Error: extra_args option '{opt}' needs a value"
+            value = tokens[i]
+            i += 1
+        if choices is None:
+            try:
+                ipaddress.IPv4Address(value)
+            except ValueError:
+                return {}, f"Error: extra_args {opt} '{value}' is not an IPv4 address"
+        elif value not in choices:
+            return {}, (
+                f"Error: extra_args {opt} '{value}' invalid. "
+                f"Choose one of: {', '.join(choices)}"
+            )
+        parsed[opt] = value
+    return parsed, ""
 
 
 def _is_noctx_filter(gtest_filter: str) -> bool:
@@ -1147,16 +1238,22 @@ def run_gtest(
     timeout_seconds: int = 600,
     auto_start_stop: bool = True,
     level: str = "",
+    pacing_way: str = "",
+    extra_args: str = "",
+    binary: str = "legacy",
 ) -> str:
     """
-    Run MTL integration tests (KahawaiTest).
+    Run MTL integration tests (KahawaiTest, or UnifiedKahawaiTest with binary='unified').
 
     Auto-discovers VF ports if not specified. Returns structured pass/fail
     counts and failure details.
 
     Args:
-        p_port: Primary port BDF (e.g. '0000:c9:01.0'). Auto-discovered if empty.
-        r_port: Receiver port BDF (e.g. '0000:c9:01.1'). Auto-discovered if empty.
+        p_port: Primary port BDF (e.g. '0000:c9:01.0'), or a kernel socket port
+            'kernel:<if>' (e.g. 'kernel:lo', which needs --p_sip in extra_args).
+            Auto-discovered if empty; a kernel: port needs both ports given.
+        r_port: Receiver port BDF (e.g. '0000:c9:01.1') or 'kernel:<if>'.
+            Auto-discovered if empty.
         gtest_filter: Gtest filter pattern (e.g. 'St20p*', 'St30*', 'Misc*'). All if empty.
         dma_dev: Comma-separated DMA devices for DMA tests (e.g. '0000:00:01.0,0000:00:01.1').
         timeout_seconds: Max seconds for test run (default 600).
@@ -1164,12 +1261,26 @@ def run_gtest(
         level: Test level, 'all' or 'mandatory'. Binary default (mandatory-only) if empty.
             Non-mandatory cases (gated ST_TEST_LEVEL_ALL) silently no-op unless 'all' is
             passed here -- they still report PASS at 0ms, so a real run must set this.
+        pacing_way: TX pacing, one of 'auto', 'rl', 'tsn', 'tsc', 'ptp', 'be'.
+            Binary default (auto) if empty.
+        extra_args: Further KahawaiTest options, whitespace-separated, as
+            '--opt value' or '--opt=value'. Only these are allowed:
+            --pacing_way <auto|rl|tsn|tsc|ptp|be>, --level <all|mandatory>,
+            --rss_mode <l3|l3_l4|none>, --iova_mode <va|pa>, --multi_src_port,
+            --p_sip <IPv4>. E.g. '--rss_mode l3_l4 --iova_mode pa --multi_src_port'.
+        binary: 'legacy' (build/tests/KahawaiTest, default) or 'unified'
+            (build/tests/UnifiedKahawaiTest). Never falls back from one to the other.
     """
-    binary = REPO_ROOT / "build/tests/KahawaiTest"
-    if not binary.is_file():
-        return "Error: KahawaiTest not built. Run `build_mtl` first."
+    test_binary, err = _test_binary(binary)
+    if test_binary is None:
+        return err
 
     sim_hint = "" if _build_has_simulate_drops() else _SIM_DROPS_HINT
+
+    if (p_port.startswith("kernel:") or r_port.startswith("kernel:")) and not (
+        p_port and r_port
+    ):
+        return "Error: a kernel: port needs both p_port and r_port given explicitly."
 
     # Auto-discover ports from VFIO-bound VFs
     if not p_port or not r_port:
@@ -1193,7 +1304,7 @@ def run_gtest(
 
     # Validate BDF inputs
     for label, bdf in [("p_port", p_port), ("r_port", r_port)]:
-        err = _validate_bdf(bdf)
+        err = _validate_bdf(bdf, allow_kernel=True)
         if err:
             return f"Error: {label} — {err}"
 
@@ -1203,6 +1314,27 @@ def run_gtest(
 
     if level and level not in ("all", "mandatory"):
         return "Error: level must be 'all' or 'mandatory'"
+
+    if pacing_way and pacing_way not in _PACING_WAYS:
+        return f"Error: pacing_way must be one of: {', '.join(_PACING_WAYS)}"
+
+    extra, err = _parse_gtest_extra_args(extra_args)
+    if err:
+        return err
+    if level and "--level" in extra:
+        return "Error: level given both as a parameter and in extra_args"
+    if pacing_way and "--pacing_way" in extra:
+        return "Error: pacing_way given both as a parameter and in extra_args"
+
+    # kernel:<if> ports run with an explicit source address, as gtest.sh's
+    # st20p_kernel_loopback case does.
+    if (p_port.startswith("kernel:") or r_port.startswith("kernel:")) and (
+        "--p_sip" not in extra
+    ):
+        return (
+            "Error: kernel:<if> ports need --p_sip in extra_args "
+            "(e.g. extra_args='--p_sip 192.168.10.1')"
+        )
 
     # NoCtxTest cases require one KahawaiTest process per test (DPDK EAL
     # cannot be re-initialised within a single process) plus the --no_ctx /
@@ -1215,13 +1347,17 @@ def run_gtest(
         )
 
     # Build command as list for safe execution
-    cmd_parts: list[str] = [str(binary), "--p_port", p_port, "--r_port", r_port]
+    cmd_parts: list[str] = [str(test_binary), "--p_port", p_port, "--r_port", r_port]
     if auto_start_stop:
         cmd_parts.append("--auto_start_stop")
     if dma_dev:
         cmd_parts.extend(["--dma_dev", dma_dev])
     if level:
         cmd_parts.extend(["--level", level])
+    if pacing_way:
+        cmd_parts.extend(["--pacing_way", pacing_way])
+    for opt, value in extra.items():
+        cmd_parts.extend([opt, value] if value else [opt])
     cmd_parts.append(f"--gtest_filter={_exclude_noctx_tests(gtest_filter)}")
 
     out = _run_output(cmd_parts, timeout=timeout_seconds, env=_test_runtime_env())
@@ -1271,6 +1407,7 @@ def run_noctx_tests(
     gtest_filter: str = "",
     timeout_seconds: int = 600,
     cooldown_seconds: int = 10,
+    binary: str = "legacy",
 ) -> str:
     """
     Run MTL no-context (noctx) integration tests.
@@ -1295,6 +1432,8 @@ def run_noctx_tests(
                       'NoCtxTest.st40i_*'). All NoCtxTest cases if empty.
         timeout_seconds: Max seconds per individual test process (default 600).
         cooldown_seconds: Sleep between tests (default 10).
+        binary: 'legacy' (build/tests/KahawaiTest, default) or 'unified'
+            (build/tests/UnifiedKahawaiTest). Never falls back from one to the other.
     """
 
     # Auto-discover only if the caller supplied nothing; otherwise respect
@@ -1328,9 +1467,9 @@ def run_noctx_tests(
     if gtest_filter and not re.match(r"^[a-zA-Z0-9_.*:/-]+$", gtest_filter):
         return "Error: invalid gtest_filter characters"
 
-    binary = REPO_ROOT / "build/tests/KahawaiTest"
-    if not binary.is_file():
-        return "Error: KahawaiTest not built. Run `build_mtl` first."
+    test_binary, err = _test_binary(binary)
+    if test_binary is None:
+        return err
 
     sim_hint = "" if _build_has_simulate_drops() else _SIM_DROPS_HINT
 
@@ -1353,7 +1492,7 @@ def run_noctx_tests(
     # Enumerate matching test names (one process per test below)
     listing = _run_output(
         [
-            str(binary),
+            str(test_binary),
             "--gtest_list_tests",
             "--no_ctx",
             f"--port_list={port_list}",
@@ -1388,7 +1527,7 @@ def run_noctx_tests(
         full = f"NoCtxTest.{name}"
         out = _run_output(
             [
-                str(binary),
+                str(test_binary),
                 "--auto_start_stop",
                 f"--port_list={port_list}",
                 f"--gtest_filter={full}",
@@ -1447,6 +1586,7 @@ def run_noctx_pf_tests(
     gtest_filter: str = "",
     timeout_seconds: int = 600,
     cooldown_seconds: int = 10,
+    binary: str = "legacy",
 ) -> str:
     """
     Run the NoCtxTest cases that require PF ports (mirrors
@@ -1468,6 +1608,8 @@ def run_noctx_pf_tests(
                       All `_pf_` cases if empty.
         timeout_seconds: Max seconds per individual test process (default 600).
         cooldown_seconds: Sleep between tests (default 10).
+        binary: 'legacy' (build/tests/KahawaiTest, default) or 'unified'
+            (build/tests/UnifiedKahawaiTest). Never falls back from one to the other.
     """
 
     if not any([port_1, port_2]):
@@ -1498,9 +1640,9 @@ def run_noctx_pf_tests(
     if gtest_filter and not re.match(r"^[a-zA-Z0-9_.*:/-]+$", gtest_filter):
         return "Error: invalid gtest_filter characters"
 
-    binary = REPO_ROOT / "build/tests/KahawaiTest"
-    if not binary.is_file():
-        return "Error: KahawaiTest not built. Run `build_mtl` first."
+    test_binary, err = _test_binary(binary)
+    if test_binary is None:
+        return err
 
     sim_hint = "" if _build_has_simulate_drops() else _SIM_DROPS_HINT
 
@@ -1521,7 +1663,7 @@ def run_noctx_pf_tests(
 
     listing = _run_output(
         [
-            str(binary),
+            str(test_binary),
             "--gtest_list_tests",
             "--no_ctx",
             f"--port_list={port_list}",
@@ -1554,7 +1696,7 @@ def run_noctx_pf_tests(
         full = f"NoCtxTest.{name}"
         out = _run_output(
             [
-                str(binary),
+                str(test_binary),
                 "--auto_start_stop",
                 f"--port_list={port_list}",
                 f"--gtest_filter={full}",
