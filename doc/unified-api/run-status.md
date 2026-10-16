@@ -17,8 +17,8 @@ base commit.
 
 | Date | Check | Result |
 |---|---|---|
-| 2026-10-16 | preparation: tests at the doc-set commit | `./build.sh` green after `build/` was moved back to the `/usr/local` prefix; `./build.sh unit` 959 passed, 1 skipped; KahawaiTest `St20p*` 44/44 on the E830 (`0000:15:01.0`/`.1`) and on the E810 (`0000:c9:01.0`/`.1`) |
-| 2026-10-16 | preparation: host | patched ICE `Kahawai_2.6.7`; MtlManager of this tree running; the stale `st41_api.h` removed from `/usr/local/include/mtl` and `.local_install/mtl/include/mtl`; both install trees at the doc-set commit (`build-both.sh`) |
+| 2026-10-16 | preparation: tests at `770294a1` (the library is unchanged since) | `./build.sh` green after `build/` was moved back to the `/usr/local` prefix; `./build.sh unit` 959 passed, 1 skipped; KahawaiTest `St20p*` 44/44 on the E830 (`0000:15:01.0`/`.1`) and on the E810 (`0000:c9:01.0`/`.1`) |
+| 2026-10-16 | preparation: host | patched ICE `Kahawai_2.6.7`; MtlManager of this tree running; the stale `st41_api.h` removed from `/usr/local/include/mtl` and `.local_install/mtl/include/mtl`; both install trees built from `770294a1` (`build-both.sh`) |
 
 ## 2. Milestones
 

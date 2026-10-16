@@ -71,8 +71,8 @@ flowchart TB
   milestone exit the exit command, in Bash. It records the result in
   [run-status.md](run-status.md) and starts the next lead. After every report it reads §2–§5 of
   this page again, because a compacted context drops rules.
-- **A milestone lead** is "the main session" of implementation-plan.md: P0, S0, M0, pytest and
-  every main-session task are its own work or work of an agent it starts. It owns its milestone's
+- **A milestone lead** is "the main session" of implementation-plan.md: P0's code, S0, M0, pytest
+  and every main-session task are its own work or work of an agent it starts. It owns its milestone's
   ledger and runs the tasks in the plan's order with the task card of implementation-plan.md §5.8,
   at most two developer tasks in flight. It reviews, commits and pushes each review unit (§5) and
   answers questions by §4. Its report to the orchestrator is under 300 words: what landed, the
@@ -89,9 +89,11 @@ flowchart TB
   `CLAUDE.md`): `mtl-developer` writes the code and its tests, `mtl-reviewer` gives the verdict
   over the saved diff, and `mtl-system-admin` runs KahawaiTest through MCP only. pytest runs from
   the lead's own shell. The lead commits, not the developer.
-- **Nobody waits for a human.** Every prompt to a planner or a designer says that there is no
-  user: the guardrails and acceptance criteria are the documents and this page, and a question
-  they cannot answer goes back to the lead for §4. Designers are `general-purpose` agents.
+- **Nobody waits for a human.** `AskUserQuestion` is denied (§9), and the agent files of
+  `mtl-planner` and `mtl-developer` carry the no-user rule. Every prompt to a planner, a designer
+  or a developer still says that there is no user: the guardrails and acceptance criteria are the
+  documents and this page, and a question they cannot answer goes back to the lead for §4.
+  Designers are `general-purpose` agents.
   `mtl-commit`'s "only when asked" and "do not push" are overridden by the standing permission of
   [ms1-status.md](ms1-status.md) §0: the push is the lead's next step after the skill.
 - **Waiting.** The orchestrator starts each lead with `run_in_background: true`, records the
@@ -114,7 +116,7 @@ flowchart TB
 | the maintainer approves a review unit, a checkpoint (C0, a milestone exit) or a config diff | `mtl-reviewer` APPROVE on the unit is the approval. A checkpoint also gets one Opus 5.5 `mtl-reviewer` pass over its whole commit range against the checkpoint's criteria |
 | stop and ask (implementation-plan.md §5.8: a public header change, a new D-row, an engine diff above the threshold, a red legacy gate) | a header change or a new D-row goes through §4. A large engine diff is split into a series. A red legacy gate is never committed: fix it, or revert to the last green commit |
 | the questions of ms1-status.md §3.1, and the items "to confirm" in §3.2 | each takes its recommendation, or the design as written, and is marked "taken in the run". A question with neither goes to §4 when its task reaches it |
-| any other approval the plan names: the rule-file change of the MS2a black-fill commit, a frozen-tree bugfix, the header batches, P0's config diffs | the lead says in the agent prompts that the approval is granted in the run; `mtl-reviewer` APPROVE on the unit is the approval, and the commit message says "approved in the autonomous run". Header changes are batched per review unit, not weekly |
+| any other approval the plan names: the rule-file change of the MS2a black-fill commit, a frozen-tree bugfix, the header batches | the lead says in the agent prompts that the approval is granted in the run; `mtl-reviewer` APPROVE on the unit is the approval, and the commit message says "approved in the autonomous run". Header changes are batched per review unit, not weekly |
 | review units a week, the calendar, the day gates and their "If missed" cuts, H1b's day-5 valve, the slip orders of §6 | do not apply: the exit criteria end a milestone, and no task is cut for time. The size valves (a part over the cap) stand. The WIP limit is two developer tasks in flight |
 | the stretch tasks A2b, B3 and X, written in MS1 and committed in MS2a | are the first tasks of MS2a |
 | the ledger states "committed" (waiting for the maintainer) and "done" (approved) | a task is done once its review unit has APPROVE and is committed and pushed; "committed" is unused |
@@ -125,16 +127,16 @@ flowchart TB
 | P0's configuration diffs and the session restart after P0 | done before the run, with the maintainer (2026-10-16): the agent rules, the MCP parameters, the frozen-tree and unified `CLAUDE.md` files and the instructions are committed, and the run's session loads them at its start. The run does P0's histogram and perf scripts; see **After P0** below |
 | a release or a person outside the run: the MS7 external review and the questionnaire, the release targets of OI-75, the deprecation releases, the EBU LIST server | goes to [run-status.md](run-status.md) §4. The run prepares everything up to the hand-off, and continues with the next item that does not depend on it |
 
-**Nightlies.** A nightly is one `sudo -E .github/scripts/gtest.sh` with `--api both` (`--api both` from
-H1b part 3; there is no `task` binary here) plus one nightly pytest pass over both applications, on one NIC. Burn-in is
-ten consecutive nightlies without a "regression" row, alternating the E830 and the E810
-(`MTL_GTEST_PF=0000:c9:00.0` selects the E810). MS2a's
-"two weeks of nightlies" is 14 consecutive nightlies, blocking and green. A case that resets a
-count twice goes to §4 as a flake. A nightly runs alone: `gtest.sh` kills every `KahawaiTest` on
-the host at its start, after each failed case and at its end (`gtest.sh` `kill_test_processes`),
-and its NoCtx cases isolate CPUs, so no Gate 6, measurement or other test runs beside it.
-`gtest.sh` runs the first PF with four vfio-pci VFs, the E830 here, unless `MTL_GTEST_PF=<pf>`
-selects another: `sudo -E MTL_GTEST_PF=0000:c9:00.0 .github/scripts/gtest.sh` runs on the E810.
+**Nightlies.** A nightly is one `sudo -E .github/scripts/gtest.sh` (with `--api both` once H1b
+part 3 adds it; there is no `task` binary here) plus one nightly pytest pass over both
+applications, on one NIC. `gtest.sh` runs the first PF with four vfio-pci VFs, the E830 here,
+unless `MTL_GTEST_PF=<pf>` selects another: `sudo -E MTL_GTEST_PF=0000:c9:00.0
+.github/scripts/gtest.sh` runs on the E810. Burn-in is ten consecutive nightlies without a
+"regression" row, alternating the E830 and the E810. MS2a's "two weeks of nightlies" is 14
+consecutive nightlies, blocking and green. A case that resets a count twice goes to §4 as a
+flake. A nightly runs alone: `gtest.sh` kills every `KahawaiTest` on the host at its start, after
+each failed case and at its end (`kill_test_processes`), and its NoCtx cases isolate CPUs, so no
+Gate 6, measurement or other test runs beside it.
 
 **Missing here.** What only a missing runner, NIC or GitHub can show goes to
 [run-status.md](run-status.md) §4. A missing tool is installed under `~/.local` without `apt`
@@ -186,11 +188,12 @@ orchestrator writes the final report and stops.
 
 ## 5. Git
 
-- **Branch.** All work goes on `unified-api-impl`. A second task in flight runs in a worktree on
-  a local branch `impl-<task>` from the head, recorded in its ledger row, with its own build
-  directory and no `ninja install` (implementation-plan.md §5.8). After APPROVE, and only when the main tree has no uncommitted changes,
-  the lead cherry-picks it onto `unified-api-impl` in the main tree and runs the unit tier and its Gate 6
-  there before it pushes. Only worktrees the run created are ever removed.
+- **Branch.** All work goes on `unified-api-impl`. A second task in flight runs in a worktree on a
+  local branch `impl-<task>` from the head, recorded in its ledger row, with its own build directory
+  and no `ninja install` (implementation-plan.md §5.8). After APPROVE, and only when the main tree
+  has no uncommitted changes, the lead cherry-picks it onto `unified-api-impl` in the main tree and
+  runs the unit tier and its Gate 6 there before it pushes. Only worktrees the run created are ever
+  removed.
 - **Commits.** Each review unit is committed through the `mtl-commit` skill once Gate 5 is APPROVE
   and Gate 6 has run where marked, with `git commit -s`. Never add AI attribution or a
   `Co-Authored-By` trailer. Ledger updates, doc fixes and the run's own process changes are
@@ -218,8 +221,8 @@ orchestrator writes the final report and stops.
   commit (T1's PR #1610 commits) is applied with `git cherry-pick -n <sha>` and committed with
   `git commit -s`, its message naming the source commit, so every hook runs and the author is the
   configured user; it is never cherry-picked, `am`-ed or rebased in as is. Before each push,
-  `git log --format='%an <%ae> %s' sakoram/unified-api-impl..` shows only the configured user. A Claude Code `PreToolUse` hook
-  (`.git/autonomous-run/bash-guard.py`, enabled by the gitignored
+  `git log --format='%an <%ae> %s' sakoram/unified-api-impl..` shows only the configured user.
+  A Claude Code `PreToolUse` hook (`.git/autonomous-run/bash-guard.py`, enabled by the gitignored
   `.github/claude/settings.local.json`) blocks bypassing the hooks, changing the remotes, force
   pushes, any write to GitHub, printing the environment, `AskUserQuestion`, and edits of the guards
   and settings. A rejected commit is fixed, never forced through. When `checkpatch` reformats a
@@ -228,7 +231,7 @@ orchestrator writes the final report and stops.
 - **A denied call.** The session runs in `dontAsk` mode (§9): a call that matches no allow rule is
   denied, never prompted. Such a call may be rephrased into an allowed form when its intent is
   allowed: split a compound command, use an absolute path or `git -C` instead of a `cd` out of the
-  repository, use a listed tool. A call refused by a deny rule, the classifier or a guard is never
+  repository, use a listed tool. A call refused by a deny rule or a guard is never
   retried in another form or through another tool. The agent saves what it would have done under
   `/home/labrat/wip/unified-api-impl/denied/`, and the lead adds a row to
   [run-status.md](run-status.md) §4 with the call and its purpose, then continues with the next
@@ -288,7 +291,7 @@ The state when the run was prepared (2026-10-16):
 | CPUs | 256 threads; node 0 is CPUs 0–63 and 128–191, node 1 is 64–127 and 192–255. Governor `performance`. No boot-time isolation (`isolcpus`, `nohz_full`); THP `madvise` |
 | Memory | 2 MB hugepages, 1024 on each NUMA node; no 1 GB pages |
 | Root | `sudo` works without a password |
-| Baseline | `./build.sh` green, `./build.sh unit` 959 passed and 1 skipped, KahawaiTest `St20p*` 44 of 44 on each NIC, all at the doc-set commit |
+| Baseline | `./build.sh` green, `./build.sh unit` 959 passed and 1 skipped, KahawaiTest `St20p*` 44 of 44 on each NIC, all at `770294a1` (the library is unchanged since; P0's configuration changed only `.github/`, the agents and the tests' `CLAUDE.md` files) |
 | MtlManager | this tree's, started by `mtl-system-admin` `manager_start`. Never touch another clone or worktree (`/home/labrat/Media-Transport-Library`, `/home/labrat/mtl-3`, `/home/labrat/mtl-2-pr1796`, `/tmp/*`) |
 | Acceptance | `/mnt/media` mounted (NFS, read-only); `tests/acceptance/venv`; the `.local_install` tree |
 | GitHub | the fork's workflows run on pushes to `main` and `maint-**` only, so pushes of `unified-api-impl` start no CI |
@@ -306,16 +309,15 @@ which `run_gtest` runs, loads `libmtl` from `/usr/local` (its RUNPATH). `gtest.s
 `.local_install/mtl` whenever it exists (`gtest.sh` puts it first on `LD_LIBRARY_PATH`), and
 `build/app`, `build/tests`, `build/manager` and the RxTxApp build install there. The acceptance
 setup (`.github/scripts/acceptance_setup_base.sh`) also moves `build/` to the `.local_install`
-prefix, which then sticks. So never run an installing `./build.sh` (release, debug, debugonly), or the `build_mtl` or
-`mtl_clean_rebuild` tool, alone; `./build.sh unit` installs nothing and runs as usual, also in a
-worktree. Instead run `/home/labrat/wip/unified-api-impl/tools/build-both.sh [mode]`. It runs
-`./build.sh` with `build/` on `/usr/local`, builds and installs `libmtl` again for
+prefix, which then sticks. So never run an installing `./build.sh` (release, debug, debugonly), or
+the `build_mtl` or `mtl_clean_rebuild` tool, alone; `./build.sh unit` installs nothing and runs as
+usual, also in a worktree. Instead run `/home/labrat/wip/unified-api-impl/tools/build-both.sh
+[mode]`. It runs `./build.sh` with `build/` on `/usr/local`, builds and installs `libmtl` again for
 `.local_install/mtl`, sets the prefix back, and records the commit in
 `.local_install/mtl/BUILT_FROM`. It does not cover the FFmpeg and GStreamer plugins: rebuild them
-before their pytest. Run it after every acceptance setup too, and restart MtlManager (`manager_stop`,
-`manager_start`) after a build that changes `manager/`.
-Gate 6 evidence from `gtest.sh` or pytest names the `BUILT_FROM` commit; a result without it is
-not evidence.
+before their pytest. Run it after every acceptance setup too, and restart MtlManager
+(`manager_stop`, `manager_start`) after a build that changes `manager/`. Gate 6 evidence from
+`gtest.sh` or pytest names the `BUILT_FROM` commit; a result without it is not evidence.
 
 ## 9. Starting and restarting
 
@@ -329,25 +331,28 @@ not evidence.
    `apt`, reading the credential files, editing the guards, other clones), and runs the guard on
    every Bash, Edit, Write and `AskUserQuestion` call, blocking when the guard fails. Then
    `/home/labrat/wip/unified-api-impl/settings/test-permissions.sh` runs a headless `dontAsk`
-   session over harmless allowed and forbidden actions and prints the result;
+   session over harmless allowed and forbidden actions and prints the result. Once the file is in
+   place the guard refuses edits of it, so a later change is the maintainer's, by hand;
 2. starts Claude Code interactively in tmux, from `/home/labrat/mtl-2` on `unified-api-impl`, with
    `claude`: the settings give `dontAsk`, so nothing prompts and `bypassPermissions` is not
    needed. Deny rules and hooks hold in subagents too.
 
 The orchestrator's first act is a guard check: `env | wc -l` must be blocked, and so must a
-subagent's `git push origin x` and a Write to `.git/hooks/x`; `git status`, a `for` loop over two
-files, `sudo -n true` and the MCP tool `hugepages_get` must run. If one of them goes the wrong way,
-it records that in [run-status.md](run-status.md) §1 and stops.
+subagent's `git push origin x` and a Write to `.git/hooks/x`. If one of them runs, the guards are
+off: it records that in [run-status.md](run-status.md) §1 and stops. Then `git status`, a `for` loop
+over two files, `sudo -n true` and the MCP tool `hugepages_get` should run; one that is denied is
+recorded there, and the run rephrases such calls (§5 "A denied call").
 
 The orchestrator's prompt, which also restarts the run after an interruption:
 
 ```text
 You are the orchestrator of the autonomous unified API run. Nobody will answer questions.
 The design in doc/unified-api/ is the foundation: build on it, and when the plan breaks,
-design alternatives carefully (autonomous-run.md §1, §4). Read doc/unified-api/autonomous-run.md, then doc/unified-api/run-status.md, and follow them
-until run-status.md §5 (the final report) is written: check the guards, then resume or start
-the next lead, verify the evidence of its report, record it and push. Beyond those two files
-never read code or whole documents yourself; delegate. Never stop a working agent.
+design alternatives carefully (autonomous-run.md §1, §4). Read doc/unified-api/autonomous-run.md,
+then doc/unified-api/run-status.md, and follow them until run-status.md §5 (the final report)
+is written: check the guards, then resume or start the next lead, verify the evidence of its
+report, record it and push. Beyond those two files never read code or whole documents
+yourself; delegate. Never stop a working agent.
 ```
 
 Each lead (`general-purpose`, `model: "opus"`, `run_in_background: true`) gets:
