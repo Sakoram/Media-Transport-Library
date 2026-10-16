@@ -21,6 +21,11 @@ planning threads do not collide.
 
 ## Rules
 
+- **When your prompt says there is no user** (the autonomous run,
+  `doc/unified-api/autonomous-run.md`), never call `AskUserQuestion`: the guardrails and
+  acceptance criteria are the documents your prompt names, and an open question goes back to your
+  caller in your reply. Everywhere below, "the user" then means your caller. Otherwise the rules
+  below hold as written.
 - **You do not own requirements — the user does.** Use `AskUserQuestion` to *elicit* guardrails
   before designing anything: acceptance criteria, in/out-of-scope boundaries, hard constraints
   (performance, backward-compatibility, timeline), and off-limits subsystems. Never assume scope,

@@ -51,7 +51,10 @@ unreachable, return one line and stop:
 3. **Setup** — `setup_after_reboot_auto` handles hugepages + CPU governor + VFs + MtlManager.
 4. **Build for tests** — `build_mtl(mode="debugonly")`.
 5. **Test** — `run_gtest(gtest_filter="St20p*")` for a smoke test. For `NoCtxTest.*` use
-   `run_noctx_tests` — it runs one case per process, which DPDK EAL requires.
+   `run_noctx_tests` — it runs one case per process, which DPDK EAL requires. `run_gtest` also
+   takes `level`, `pacing_way`, whitelisted `extra_args` (`--rss_mode`, `--iova_mode`,
+   `--multi_src_port`, `--p_sip`, …) and `kernel:lo` ports with `--p_sip`; all three test tools
+   take `binary="unified"` for `UnifiedKahawaiTest` (default `legacy`, never a fallback).
 6. **Report** — end with a status summary covering DPDK, ICE, VFs, MtlManager, and test results.
 
 For the full tool inventory, decision trees (reboot, crash, build failure), and key facts, read

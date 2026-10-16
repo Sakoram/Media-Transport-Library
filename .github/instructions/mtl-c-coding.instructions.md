@@ -93,5 +93,5 @@ These rules are **mandatory** for all C source in the MTL codebase. For deep arc
 
 ## Formatting
 
-- `clang-format-14` enforced by CI
-- Run `./format-coding.sh` before committing
+- clang-format 22.1.8, pinned in `.pre-commit-config.yaml`, enforced by CI; `.clang-format` is a real file at the root
+- Run `./format-coding.sh --files <changed files>` (or `./checkpatch.sh --files …` to verify) before committing

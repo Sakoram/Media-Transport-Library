@@ -159,6 +159,7 @@ vd_report_build() {
 	echo "- libdpdk (system, for gtest): $(pkg-config --modversion libdpdk 2>/dev/null || echo MISSING)"
 	echo "- $prefix/bin/MtlManager: $([[ -x "$prefix/bin/MtlManager" ]] && echo OK || echo MISSING)"
 	echo "- $prefix/bin/RxTxApp: $([[ -x "$prefix/bin/RxTxApp" ]] && echo OK || echo MISSING)"
+	echo "- $prefix/bin/UnifiedRxTxApp: $([[ -x "$prefix/bin/UnifiedRxTxApp" ]] && echo OK || echo "MISSING (only needed for application=rxtxapp_unified tests)")"
 	echo "- $prefix/lib*/libmtl.so: $([[ -f "$prefix/lib64/libmtl.so" || -f "$prefix/lib/x86_64-linux-gnu/libmtl.so" ]] && echo OK || echo MISSING)"
 	echo "- $VD_REPO_ROOT/.local_install/ffmpeg/bin/ffmpeg: $([[ -x "$VD_REPO_ROOT/.local_install/ffmpeg/bin/ffmpeg" ]] && echo OK || echo "MISSING (only needed for application=ffmpeg tests)")"
 	echo "- $VD_REPO_ROOT/.local_install/gstreamer: $([[ -d "$VD_REPO_ROOT/.local_install/gstreamer" ]] && echo OK || echo "MISSING (only needed for application=gstreamer tests)")"

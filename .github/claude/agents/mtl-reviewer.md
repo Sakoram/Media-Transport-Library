@@ -203,6 +203,27 @@ mempool naming, logging, error-return convention. Cite the specific rule violate
 - **Branch in hot loop** — a conditional that could be hoisted out of the per-packet loop.
 - **Cache-unfriendly access** — pointer chasing, non-sequential access in per-packet code.
 
+### 6. Unified API and the frozen trees
+
+The design is `doc/unified-api/`; read the section the rule names, do not judge from memory.
+
+- **Frozen trees.** A diff in `tests/integration_tests/` or `tests/tools/RxTxApp/` is a BLOCKER
+  unless it is a change `implementation-plan.md` §4.1 allows, approved by the maintainer: the run
+  option, a build fix, a legacy or harness bugfix, or the tree's `CLAUDE.md` rule. In the
+  autonomous run the approval is the one `autonomous-run.md` §3 grants: check that the diff
+  really is one of these.
+- **RX gaps.** Until MS2a the bytes of lost ranges in unified core and binding RX units are
+  unspecified (`implementation-plan.md` §5.1): the C rule "RX frame buffers must be
+  zero-initialized" does not apply to them. From MS2a library pools take D-242's fill (video
+  the format's black; audio, cvideo and fastmeta zero; ANC units never; `contract.md` §9.8).
+- **Later milestones.** Per-milestone exports and `-MTL_ENOTSUP` for values of a later milestone
+  are required, not dead code.
+- **Prefixes.** `st_core_` in the core, `bind_` in the bindings, `mtl_` only for exported symbols.
+- **Essence.** The core reads no essence (lint `core_no_essence`), and only `bind_*.c` builds
+  engine `ops` (`core.md` §2, §2.1). A violation is a BLOCKER.
+- **Legacy branches.** A `ST_CORE_LEGACY_*` mode or a legacy branch in `lib/src/st2110/core/`
+  without a row in `migration.md` §6.5 is a BLOCKER.
+
 ## Output Format
 
 ```markdown

@@ -38,8 +38,8 @@ The Copilot workflow above has been ported to Claude Code equivalents, so the sa
 skills, and MCP servers are usable directly.
 
 Everything lives in `.github/claude/`, next to the Copilot originals it mirrors. Claude Code
-only discovers config at fixed paths, so three tracked symlinks bridge the two — the same idiom
-`.clang-format -> .github/linters/.clang-format` already uses:
+only discovers config at fixed paths, so three tracked symlinks bridge the two (non-linter
+configuration, so exempt from the no-symlink rule of `doc/coding_standard.md` §6.2):
 
 | Discovery path | Real file |
 |---|---|
@@ -72,10 +72,12 @@ and relative links inside a skill body resolve against `.github/skills/<name>/`.
 deferred: call `ToolSearch` before invoking `mcp__mtl-system-setup__*` etc. The wrapper scripts
 create and populate `.github/mcp/.venv` on first launch.
 
-**Path-scoped context** — `lib/`, `tests/unit/`, `tests/integration_tests/`, and
-`tests/acceptance/` each carry a small `CLAUDE.md` that imports the matching
-`.github/instructions/*.md`. That reproduces the Copilot `applyTo:` auto-attach, so the C rules
-or the gtest/pytest instructions load when you actually work in those trees.
+**Path-scoped context** — `lib/`, `tests/unit/`, `tests/integration_tests/`,
+`tests/unified_integration_tests/`, `tests/tools/RxTxApp/` and `tests/acceptance/` each carry a
+small `CLAUDE.md` that imports the matching `.github/instructions/*.md`. That reproduces the
+Copilot `applyTo:` auto-attach, so the C rules or the gtest/pytest instructions load when you
+actually work in those trees. The ones of `tests/integration_tests/` and `tests/tools/RxTxApp/`
+also state that these trees are frozen (`doc/unified-api/implementation-plan.md` §4.1).
 
 One difference from the Copilot version worth knowing: `mtl-system-admin`'s "MCP tools only, never
 a shell" rule is enforced by its prompt rather than by withholding the Bash tool, because MCP
@@ -109,12 +111,16 @@ versions live in `versions.env` (DPDK, ICE, JPEG-XS, FFmpeg, xdp-tools, libbpf).
 ## Format and lint
 
 ```bash
-./format-coding.sh          # clang-format-14 (C/C++), isort+black (Python), shfmt (shell)
+./checkpatch.sh --files a.c b.md   # verify these files; ./checkpatch.sh alone checks the tree, as CI does
+./format-coding.sh --files a.c     # apply the autofixes; --check previews without writing
 ```
 
-`clang-format-14` specifically — CI rejects output from other versions. Run before every
-commit. `.clang-format` symlinks to `.github/linters/.clang-format`. Markdown is checked
-with `.markdown-lint.yml`, YAML/shell/actions via super-linter (see README §6.2.3).
+`.pre-commit-config.yaml` pins every tool and version (clang-format 22.1.8 from
+mirrors-clang-format, isort+black, shfmt, markdownlint, textlint, …) and `pre-commit` installs
+them itself, so the host's clang-format does not matter. Run before every commit; a failing
+verify leaves the fixers' changes in the tree for review. `.clang-format` is a real file at the
+root, not a symlink; the other rule files live in `.github/linters/`. Details:
+`doc/coding_standard.md`.
 
 ## Tests
 
@@ -156,7 +162,10 @@ sudo -E ./venv/bin/python3 -m pytest \
 Always the venv python (`sudo python3` lacks `pytest_mfd_config`), always both config flags.
 Host prep: `.github/scripts/acceptance_setup.sh` (interactive, or `--auto`). Most cases need
 `/mnt/media` mounted over NFS. Never edit `conftest.py`, `common/`, or `mtl_engine/` to make a
-test pass — fix the environment or config.
+test pass — fix the environment or config. The one exception is the new application of the unified
+API (task P1, `doc/unified-api/implementation-plan.md` §4.1): the `rxtxapp_unified` adapter in
+`mtl_engine/` and its entry in the `application` fixture of `conftest.py`, with the `--app` filter
+on that fixture's params.
 
 **Fuzz (`tests/fuzz/`)** — single-packet libFuzzer harnesses over RX parsers; see
 `tests/doc/fuzz/index.rst`. `task ci:fuzz -- build` then `task ci:fuzz -- run` is what

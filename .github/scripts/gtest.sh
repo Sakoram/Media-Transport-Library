@@ -48,6 +48,7 @@ SUDO_PREFIX="sudo -E env LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-} PATH=${PATH}"
 : "${HOST_OP_TIMEOUT:=180}"                             # Hard bound for one nicctl listing
 : "${TEST_KILL_GRACE:=30}"                              # SIGKILL delay after SIGTERM for a test case
 : "${MIN_VFIO_PORTS:=4}"                                # Ports of one PF the suite needs on vfio-pci
+: "${MTL_GTEST_PF:=}"                                   # PF BDF whose ports the suite runs on; the first PF with enough if empty
 : "${DMA_CHANNELS:=2}"                                  # DMA channels a case is given when the host serves them
 : "${SYSFS_PCI_DEVICES:=/sys/bus/pci/devices}"          # Where the ports are looked up; the contract tests point this at a fixture
 : "${PROC_MEMINFO:=/proc/meminfo}"                      # Where the hugepages are counted; likewise a fixture under test
@@ -186,7 +187,7 @@ dma_channels() {
 }
 
 # Prints the vfio-pci ports of the first PF in a nicctl.sh listing that has
-# enough of them.
+# enough of them, or of the PF MTL_GTEST_PF names.
 #
 # They have to belong to one PF: a transmitter and a receiver on two different
 # cards are on two different networks, and every case here expects the pair to
@@ -201,6 +202,7 @@ ports_of_one_pf() {
 	done < <(awk '$3 == "vfio-pci" {print $2}' "${listing}")
 
 	for pf in $(printf '%s\n' "${!by_pf[@]}" | sort); do
+		[ -z "${MTL_GTEST_PF}" ] || [ "${pf}" = "${MTL_GTEST_PF}" ] || continue
 		read -r -a group <<<"${by_pf[$pf]}"
 		if [ "${#group[@]}" -ge "${MIN_VFIO_PORTS}" ]; then
 			printf '%s\n' "${group[@]}"
@@ -248,6 +250,8 @@ discover_ports() {
 	if [ "${#ports[@]}" -lt "${MIN_VFIO_PORTS}" ]; then
 		nicctl_wedged && host_fault "nicctl.sh stopped responding while listing NIC ports"
 		cat "${listing}"
+		[ -z "${MTL_GTEST_PF}" ] ||
+			not_prepared "PF ${MTL_GTEST_PF} (MTL_GTEST_PF) has fewer than the ${MIN_VFIO_PORTS} vfio-pci ports the suite needs."
 		not_prepared "No PF has the ${MIN_VFIO_PORTS} vfio-pci ports the suite needs."
 	fi
 
@@ -549,6 +553,7 @@ print_configuration() {
 	echo "TEST_P_SIP: $TEST_P_SIP"
 	echo "TEST_R_SIP: $TEST_R_SIP"
 	echo "FAIL_FAST: ${FAIL_FAST:-<not set>}"
+	echo "MTL_GTEST_PF: ${MTL_GTEST_PF:-<first PF with ${MIN_VFIO_PORTS} vfio-pci ports>}"
 	echo "TEST_PORT_1..4: ${TEST_PORT_1} ${TEST_PORT_2} ${TEST_PORT_3} ${TEST_PORT_4}"
 	echo "NoCtx ports: ${noctx_port[*]}"
 	echo "NoCtx CPU isolation: ${noctx_isolation:-<not probed, no noctx case>}"
