@@ -1027,26 +1027,26 @@ removes the dangling pointer; the safe layer is rewritten in MS6, with `Option<i
 
 ## 9. In-tree consumers
 
-Legacy call sites in-tree (`git grep` at `545a266a`), and the effort if the pipelines go with no
-shim:
+Legacy call sites in-tree (lines of `git grep` at `a6fc9093` matching a `_tx_` or `_rx_` call or
+`_ops` struct of a session or pipeline family), and the effort if the pipelines go with no shim:
 
 | Consumer | Call sites | Files | Effort | Note |
 |---|---|---|---|---|
-| RxTxApp | 156 | 19 | medium to large | plus a 3.5 kLOC JSON parser; the acceptance suite depends on it |
-| KahawaiTest | 752 | 31 | very large (weeks) | about 306 distinct functions; it is also the regression net, so the legacy API stays alive meanwhile |
-| `app/sample` | 260 | 35 | medium, mostly mechanical | many samples dropped or merged |
+| RxTxApp | 142 | 17 | medium to large | plus a 3.5 kLOC JSON parser; the acceptance suite depends on it |
+| KahawaiTest | 865 | 33 | very large (weeks) | about 310 distinct functions; it is also the regression net, so the legacy API stays alive meanwhile |
+| `app/sample` | 261 | 35 | medium, mostly mechanical | many samples dropped or merged |
 | FFmpeg | 61 | 6 | small | about 3 kLOC; a rewrite gains zero copy; vendored by directview-led |
-| GStreamer | 58 | 8 | small to medium | a chance to add clock, latency, unlock, buffer pool |
+| GStreamer | 216 | 14 | small to medium | a chance to add clock, latency, unlock, buffer pool |
 | OBS | 10 | 2 | trivial | arguably unmaintained |
 | Python | 48 | | small | SWIG regenerates; carry the Python-only helpers |
 | Rust | 36 | | small | its safe layer has undefined behaviour and is rewritten anyway |
 | MXL POC | 52 | 8 | medium | it stresses the buffer model, a good validation target |
 | `plugins/` | 0 (plugin ABI) | | none while the plugin ABI is separate ([§7](#7-codec-plugin-abi-v2-mtl_pluginh)) | |
-| unit tests | 78 | 30 | | |
+| unit tests | 163 | 42 | | |
 | external users | | | unknown | pinned versions; for bobistudio the cost is its patches, not the API ([legacy-internals.md](legacy-internals.md)) |
 
-About 1,500 call sites in all, half in KahawaiTest. About ten private downstream repositories were
-not inspected; they are surveyed before the header freeze (MS7).
+About 1,850 call sites in all, almost half in KahawaiTest. About ten private downstream repositories
+were not inspected; they are surveyed before the header freeze (MS7).
 
 ### 9.1 RxTxApp (`tests/tools/RxTxApp/`)
 

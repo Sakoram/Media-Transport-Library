@@ -4,7 +4,7 @@
 |---|---|
 | Status | Design complete; implementation starts with milestone MS1 ([implementation-plan.md](implementation-plan.md)). Nothing is implemented yet |
 | Normative | the headers in [sketch/include/mtl/experimental/](sketch/include/mtl/experimental/) (they move to `include/mtl/experimental/` in task H1b of MS1); where a document and a header disagree, the header is right |
-| Baseline | `main` @ `545a266a`; every `path:line` in these documents is pinned there |
+| Baseline | `a6fc9093`, the base of `unified-api-impl`; every `path:line` in these documents is pinned there. Its code trees (`lib/`, `include/`, `app/`, `tests/`, `ecosystem/`, `manager/`, `plugins/`, `python/`, `rust/`) are those of `main` @ `2fe5599f`; `.github/` and the tests' `CLAUDE.md` files differ from `main` by the run's preparation commits |
 
 The unified API is the one public API MTL converges on. One session type serves every ST 2110
 essence: video, compressed video, audio, ANC, fast metadata and generic RTP. One unit struct

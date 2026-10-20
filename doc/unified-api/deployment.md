@@ -4,7 +4,7 @@
 |---|---|
 | Status | The operator's document: security, containers, Kubernetes pods and crash safety. The Kubernetes rules are decisions D-89–D-92; the instance open and close land in MS1, health and the shutdown report in MS3 ([implementation-plan.md](implementation-plan.md) §6.2), and the engine fixes EK1–EK21 on the Kubernetes track beside the milestones, done by the MS3 exit (§6.8 there) |
 | Headers | `mtl.h` (R4, R8, `mtl_instance_open`, `mtl_instance_close`, `mtl_instance_abort`, `env:` ports), `mtl_observe.h` (health, shutdown), `mtl_options.h` 400, 2010, 2020–2027, 2110, 2123–2125, 2203, 2207, `mtl_reasons.h` 10, 11, 104, 112–115, 520, 600–614, `mtl_events.h` events 23–25 |
-| Baseline | `main` @ `545a266a`, DPDK 26.07 |
+| Baseline | `a6fc9093`, whose code is `main` @ `2fe5599f`; DPDK 26.07 |
 
 MTL runs with privileges most libraries never get. It owns NIC queues through VFIO, pins memory and
 maps it for device DMA, runs polling tasklet schedulers on dedicated CPUs, and may talk to a root daemon. This
@@ -149,7 +149,7 @@ builds. A debug-API library logs a warning at open and reports it in its stats.
 ### 1.6 MtlManager trust
 
 MtlManager is a root daemon: it grants CPUs across processes, loads XDP programs, adds flows and UDP
-filters, and hands out XSK map descriptors. At `545a266a` **[verified]** unless marked:
+filters, and hands out XSK map descriptors. At `a6fc9093` **[verified]** unless marked:
 
 - the socket `/var/run/imtl/mtl_manager.sock` (`manager/mtl_mproto.h:16`, no override) is mode `0666`
   ("Allow all users to connect (which might be insecure)", `manager/mtl_manager.cpp:112-122`;
@@ -808,7 +808,7 @@ spec:
   containers **[verified]**, so its bounded close must also cover clients that never said goodbye. Init
   containers cannot hold devices for the application **[inferred]**.
 
-### 4.16 Today's code at `545a266a`
+### 4.16 Today's code at `a6fc9093`
 
 What the audit found, with the engine fix that removes it ([engine.md](engine.md) has the fixes, EK1–EK21).
 **[verified]** unless marked.

@@ -11,8 +11,8 @@ entry, queues and posts, the correctness argument, and timeouts per platform. Th
 cases, the mutants and the pause-hook tests that check the protocol are
 [design/wait-tests.md](design/wait-tests.md). Internal names are indicative, as in core.md.
 
-**Citations.** As in [core.md](core.md): every `path:line` is at `main` @ `545a266a`, with the
-markers of [engine.md](engine.md).
+**Citations.** As in [core.md](core.md): every `path:line` is at `a6fc9093`, whose code is
+`main` @ `2fe5599f`, with the markers of [engine.md](engine.md).
 
 **Start here.**
 

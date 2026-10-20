@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | Plan of record. Nothing is implemented. The decisions it rests on are in [decisions.md](decisions.md) (D-99…D-112 shape it) |
-| Baseline | `main` @ `545a266a`; the headers in [sketch/include/mtl/experimental/](sketch/include/mtl/experimental/) |
+| Baseline | `a6fc9093`, whose code is `main` @ `2fe5599f`; the headers in [sketch/include/mtl/experimental/](sketch/include/mtl/experimental/) |
 
 The headers are normative. Every API name in this plan is a header name; names inside the
 library (the core, the bindings) are indicative.
@@ -1789,8 +1789,8 @@ test blocks its milestone) or **BE** (best effort until the named evidence exist
 without a test is not promised. A milestone is done only when every MUST requirement in its
 scope ([requirements.md §3.1](requirements.md#31-the-catalogue)) has a contract test at the
 cheapest tier that can observe it. A red P test blocks the exit; a BE guarantee never does, and its row says what evidence would make it P.
-Why U over the null backend: UB is the most brittle tier; at `545a266a` 24 unit-test files
-`#include` production `.c` files, and 60 commits touched them in 2026. So guarantees that are
+Why U over the null backend: UB is the most brittle tier; at `a6fc9093` 24 unit-test files
+`#include` production `.c` files, and 95 commits touched them in 2026. So guarantees that are
 properties of the core alone (G-04, G-30, G-49, G-57, G-64 and most later ones) are U over
 `null:1` and need no engine internals. Properties of the engine boundary stay UB, because that
 is where PR #1610 failed (its lost timing metadata, [pr1610.md](pr1610.md) §2);

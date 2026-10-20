@@ -223,7 +223,7 @@ tier. The session layer stays the internal engine: the pipelines call `st20_tx_c
 same way, with the binding's callbacks in the `ops`.
 
 The two pictures below are today's include graph (from [coverage.md §4.1](coverage.md#41-todays-public-header-set),
-checked against `include/` at `545a266a`); an arrow means "includes". The first shows the session
+checked against `include/` at `a6fc9093`); an arrow means "includes". The first shows the session
 headers, which all reach `mtl_api.h`:
 
 ```mermaid
@@ -232,7 +232,6 @@ flowchart LR
         S20["st20_api.h<br/>(ST 20 and ST 22)"]
         S30["st30_api.h"]
         S40["st40_api.h"]
-        S41["st41_api.h"]
     end
     MEDIA --> ST["st_api.h"]
     ST --> API["mtl_api.h"]

@@ -13,9 +13,9 @@ the engine changes and the known defects are [engine.md](engine.md); what every 
 `st_core_*`, `bind_*.c`, `lib/src/st2110/core/`, `lib/src/unified/`) are indicative; task C0
 fixes them (§8).
 
-**Citations.** Every `path:line` is at `main` @ `545a266a`, with the markers of
-[engine.md](engine.md): **[verified at HEAD]** re-read against that commit, **[inferred]**
-following from the code without a run.
+**Citations.** Every `path:line` is at `a6fc9093`, whose code is `main` @ `2fe5599f`, with the
+markers of [engine.md](engine.md): **[verified at HEAD]** re-read against that commit,
+**[inferred]** following from the code without a run.
 
 **Start here.** Implementers read this file by task. Every MS1 task first reads §1–§3
 (README.md §1); the full reading lists, with the other documents, are

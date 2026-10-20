@@ -2469,7 +2469,7 @@ sequenceDiagram
 | `enum mtl_path` | TX | RX |
 |---|---|---|
 | `MTL_PATH_DIRECT` | the NIC reads the slot (extbuf chain); packets crossing row padding or a PA-mode page are copied and counted | the CPU places each payload into the slot, no intermediate frame |
-| `MTL_PATH_DIRECT_DMA` | — (no TX session uses a DMA engine at `545a266a`; TX `pkts_dma` stays 0) | a DMA engine places payloads, with a per-packet CPU fallback (`rx.pkts_dma`, `rx.pkts_cpu`) |
+| `MTL_PATH_DIRECT_DMA` | — (no TX session uses a DMA engine at `a6fc9093`; TX `pkts_dma` stays 0) | a DMA engine places payloads, with a per-packet CPU fallback (`rx.pkts_dma`, `rx.pkts_cpu`) |
 | `MTL_PATH_CONVERT` | a converter reads the slot and writes an internal transport frame, which is sent | an internal frame is filled; a converter writes the slot |
 | `MTL_PATH_COPY` | packets built by copying (no chain, cvideo, audio, ANC, fastmeta, AF_XDP, kernel socket, copy-only regions) | an extra copy from an internal frame |
 | `MTL_PATH_COPY_CONVERT` | a copy of a converted frame | — |

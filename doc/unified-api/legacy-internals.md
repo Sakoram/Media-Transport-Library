@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Maintained reference of today's library at `main` @ `545a266a`; the code is identical at `149a0ad4`. Facts only: the normative headers are `sketch/include/mtl/experimental/` |
+| Status | Maintained reference of today's library at `a6fc9093`, whose code is `main` @ `2fe5599f`. Facts only: the normative headers are `sketch/include/mtl/experimental/` |
 | Reads with | [engine.md](engine.md) |
 
 What the legacy API offers, how `lib/` behaves inside, and what its consumers rely on, each with
@@ -26,11 +26,11 @@ wrappers, and the maintainers. How the unified API sits on this code, and every 
 
 ## 1. How to read this
 
-**Baseline.** Every `path:line` is at `main` @ `545a266a`. `lib/`, `include/`, `app/`,
-`ecosystem/`, `manager/`, `plugins/`, `python/`, `rust/` and `tests/` are unchanged at `149a0ad4`
-(`git diff --stat 545a266a 149a0ad4` is empty), so the lines read the same there. Paths without a
-directory are under `lib/src/`; session files are in `lib/src/st2110/`, pipeline files in
-`lib/src/st2110/pipeline/`.
+**Baseline.** Every `path:line` is at `a6fc9093`, the base of `unified-api-impl`. Its `lib/`,
+`include/`, `app/`, `ecosystem/`, `manager/`, `plugins/`, `python/`, `rust/` and `tests/` are as on
+`main` @ `2fe5599f` (`git diff --stat 2fe5599f a6fc9093` over them lists only the tests'
+`CLAUDE.md` files), so the lines read the same there. Paths without a directory are under
+`lib/src/`; session files are in `lib/src/st2110/`, pipeline files in `lib/src/st2110/pipeline/`.
 
 **Labels.** **[verified]**: read in code at the cited line. **[inferred]**: follows from verified
 code plus DPDK, glibc or kernel behaviour, not executed. **[unknown]**: not established.
@@ -45,7 +45,7 @@ code plus DPDK, glibc or kernel behaviour, not executed. **[unknown]**: not esta
 | completing contexts and `sh_info`; `mtl_dma_map`, backing detection, the memseg budget, RX DMA thresholds, PA mode | core.md §4.3, engine.md §2.16 |
 | stalled queues, no TX queue stop, today's uninit order; recovery triggers | engine.md §4, §5 |
 | defects SF-01…SF-88, SP-01…SP-10, SC-01…SC-08, DD-01…DD-21, H-K-1…H-K-28, RTP-level defects | engine.md §7 |
-| pod hazards with evidence; MtlManager trust, MtlManager in pods, AF_XDP rate in pods | [deployment.md §4.16](deployment.md), §1.6, §4.12, §4.13 |
+| pod hazards with evidence; MtlManager trust, MtlManager in pods, AF_XDP rate in pods | [deployment.md §4.16](deployment.md#416-todays-code-at-a6fc9093), §1.6, §4.12, §4.13 |
 | legacy timing surface → unified | [timing.md §14](timing.md) |
 | per-consumer port notes and call-site counts; the ABI summary | [migration.md §9](migration.md); [abi.md](abi.md) |
 
@@ -463,7 +463,7 @@ the U-row is right.
 The fix rows are engine.md §7.2 (DD). Rows #1, #5–#10, #12–#14 (DD-05, DD-16, DD-10, DD-02,
 DD-13a, DD-17, CUT-4, DD-04, DD-06, DD-07) have their full evidence in the DD row; the others add to
 it. Every DD row is fixed on main except DD-16 (in part) and DD-19…DD-21; engine.md §7.2 gives the
-commit of each. Lines at `545a266a`.
+commit of each. Lines at `a6fc9093`.
 
 | # | Drift | Evidence | Row |
 |---|---|---|---|
@@ -569,7 +569,8 @@ Nothing in the tree implements ST 2022-6; the docs only name it as the reason th
 ## 4. Instance, process and session lifecycle
 
 **[verified]** unless marked. The start/stop, EAL and uninit facts the core builds on are
-engine.md §2.10 and §4; the pod hazards deployment.md §4.16.
+engine.md §2.10 and §4; the pod hazards
+[deployment.md §4.16](deployment.md#416-todays-code-at-a6fc9093).
 
 ### 4.1 Instance
 
@@ -1611,8 +1612,9 @@ app is not told about).
 
 ## 9. What a process leaves behind, MtlManager and recovery
 
-**[verified]** unless marked. The hazards with their fixes are deployment.md §4.16 and engine.md
-§7.3; recovery triggers are engine.md §5.
+**[verified]** unless marked. The hazards with their fixes are
+[deployment.md §4.16](deployment.md#416-todays-code-at-a6fc9093) and engine.md §7.3; recovery
+triggers are engine.md §5.
 
 **Exit paths.** MTL installs no signal handler, no `atexit` and no watchdog (no `signal(`,
 `sigaction` or `atexit` in `lib/src`); DPDK registers one `atexit`, for its telemetry socket. Every
@@ -1784,7 +1786,7 @@ C++-clean (`new` as an identifier), so a new core is tested through C shims.
 | Python (SWIG) | 1,701 | st20, st20p, st22p + convert | BLOCK_GET polling (callbacks unusable) | RX ctypes/numpy view, TX copies | none | none |
 | Rust (`imtl-rs`) | 2,868 | st20, st20p, st22p, st30p | callbacks mutate a ring from lcore threads; the user thread parks | copies | none | none |
 | `plugins/` | 1,343 | plugin ABI | a pthread per session, BLOCK_GET or own condvar | library frames | n/a | none |
-| KahawaiTest | 26,560 | nearly all (~306 functions), not st20rc, lcore shm | frame threads + `std::condition_variable` | library, ext, dynamic ext, manual release | user pacing, timestamp, exact | stats in st20p/st30p/st40p and noctx; SHA-256 checks |
+| KahawaiTest | 26,560 | nearly all (~310 functions), not st20rc, lcore shm | frame threads + `std::condition_variable` | library, ext, dynamic ext, manual release | user pacing, timestamp, exact | stats in st20p/st30p/st40p and noctx; SHA-256 checks |
 | unit tests | 25,871 | internals, some pipeline and FFmpeg `mtl_common` | — | — | — | — |
 
 The RTP level's in-tree users are §3.8. `ld_preload/` has no sources since `2b182cd87` (#1647,
@@ -1839,7 +1841,7 @@ DD-01); `manager/` is an IPC peer (`manager/mtl_mproto.h`), its only public hook
   (`gst_mtl_st20p_rx.c:477`, `:513`) with no base-time or running-time conversion; TX
   `use-pts-for-pacing` writes `GST_BUFFER_PTS(buf) += offset` into the buffer once per GstMemory
   (`gst_mtl_st20p_tx.c:650`, `:718`) and requires the PTS already in TAI
-  (`ecosystem/gstreamer_plugin/README.md:157-184`). At `545a266a` no lock is held across the
+  (`ecosystem/gstreamer_plugin/README.md:157-184`). At `a6fc9093` no lock is held across the
   blocking get.
 - **OBS.** `out.data[i] = frame->addr[0] + plane_offsets[i]` with hard-coded linesizes
   (`mtl-input.c:126-128`); the output is a stub (`mtl-output.c:7`). Whether `put_frame` may be called
@@ -1936,7 +1938,7 @@ GitHub issues of the repository (`OpenVisualCloud/Media-Transport-Library`) by t
 | configuration | #948 (st30p `fifo_size` ignored; stale, see below), #687 (misleading `sip_addr`), #657 (log callback, done), #1239 (open: `mcast_sip_addr` ineffective, SF-70), #1179 (open: `lcores`/`main_lcore` undocumented), #1176 (stale lcore shm) |
 | back-pressure | #1517 ("slot get frame fail" was app back-pressure) |
 
-Issue #948 is stale at `545a266a`: st30p forwards `fifo_size` (`st30_pipeline_tx.c:308`), and 0 means
+Issue #948 is stale at `a6fc9093`: st30p forwards `fifo_size` (`st30_pipeline_tx.c:308`), and 0 means
 10 ms of packets, at least 2 (`ST30_TX_FIFO_DEFAULT_TIME_MS`, `include/st30_api.h:128`;
 `st_tx_audio_session.c:1913-1934`). Most timing, redundancy and stats reports come from three
 reporters (cwhite102, DianaEs2, ZeroDawn) of one product team using ext frames, user pacing, user

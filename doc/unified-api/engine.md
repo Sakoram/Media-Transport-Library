@@ -10,7 +10,7 @@ bindings and its seams are [core.md](core.md). Public names
 are those of the headers in `sketch/include/mtl/experimental/`, which are normative. Internal
 names (the core, the bindings, `lib/src/st2110/core/`, `lib/src/unified/`) are indicative.
 
-**Citations.** Every `path:line` is at `main` @ `545a266a` (`lib/` is unchanged at later documentation-only commits). Paths
+**Citations.** Every `path:line` is at `a6fc9093`, whose code is `main` @ `2fe5599f`. Paths
 without a directory are under `lib/src/`; session files are in `lib/src/st2110/`, pipeline files
 in `lib/src/st2110/pipeline/`. Citations marked **[verified at HEAD]** were re-read against that
 commit. **[inferred]** means the effect follows from the code but was not run.
@@ -1371,9 +1371,9 @@ do not change).
 
 ## 7. Known defects
 
-Defects of today's `lib/` at `545a266a`. Status legend: **#1770** = fixed in PR #1770
+Defects of `lib/`, with their status at `a6fc9093`. Status legend: **#1770** = fixed in PR #1770
 (`fix/side-findings`, merged on main on 2026-10-07; SF-05 and SF-08 are fixed on main); **#1770
-part** = partly; **fixed on main** (`<commit>`) = fixed after the baseline by that commit of `main`,
+part** = partly; **fixed on main** (`<commit>`) = fixed by that commit of `main`,
 or moot because it removed the code (**in part** = partly); **open** with the change that fixes it
 and its milestone. The status column was checked against PR #1770 at head `74b9991d` (38 commits,
 +3208/−371 in 132 files) by reading its diff and commit messages. Most rows are worth fixing before
@@ -1628,8 +1628,8 @@ Row details:
 | SC-08 | OBS: `pthread_mutex_unlock` on a mutex that is not held | `ecosystem/obs_mtl/linux-mtl/mtl-input.c:117-124` | fixed on main (`bc98117b6`) |
 
 SC-07: PR #1770 fixed the first three, a double frame put and a dropped-frame return, but none of
-its sample fixes landed on main (since the baseline only `app/sample/README.md` changed), so the row
-is open.
+its sample fixes landed on main (since the row was written, `app/sample/` changed only in
+`README.md`, `05dc9c16e`), so the row is open.
 
 ### 7.2 Documentation drift (DD)
 

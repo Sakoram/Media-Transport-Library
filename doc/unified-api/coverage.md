@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | Maintained. The headers in [sketch/include/mtl/experimental/](sketch/include/mtl/experimental/) are normative: where this page and a header disagree, the header wins |
-| Baseline | `main` @ `545a266a`; legacy headers in `include/`; the 15 unified headers (their function counts, per header and per milestone tag: `sketch/check.sh`) |
+| Baseline | `a6fc9093`, whose code is `main` @ `2fe5599f`; legacy headers in `include/`; the 15 unified headers (their function counts, per header and per milestone tag: `sketch/check.sh`) |
 
 This page is the safety net of port first (D-98): every use case today's public API offers, the
 unified symbol that reaches it, and the milestone that brings it ([implementation-plan.md](implementation-plan.md)
@@ -585,7 +585,7 @@ The U-row of §2 gives the symbol and the milestone.
 | `app/v4l2_to_ip` | `st20_api.h` (`v4l2_to_ip.c:31`), session TX with ext frames | video TX with attached slots (MS2) |
 | `app/tools`, `app/perf` | lcore shm, convert, `*_simd_dma`, lcore borrow, udma | the internal dependency (in-tree tools) |
 | RxTxApp | session ANC apps in the main tree (fast metadata by a `fast_metadata` key); legacy video, audio, st22; experimental st20rc; JSON kinds `video`, `audio`, `ancillary`, `st22` (`tests/acceptance/mtl_engine/rxtxapp_config.py:20-39`) | `UnifiedRxTxApp` beside the frozen RxTxApp: `st20p` MS1, slice MS2, the other kinds MS4, RTP MS5; the JSON schema kept ([migration.md](migration.md) §9.1) |
-| KahawaiTest, unit, fuzz | 752 session call sites; unit and fuzz compile lib `.c` (`tests/unit/session/st20_harness.c:39`, `tests/fuzz/st20/st20_rx_frame_fuzz.c:39`; `tests/unit/meson.build:20-21`, `tests/fuzz/meson.build:43-44`) | not blockers: the internal dependency; they keep testing the engine |
+| KahawaiTest, unit, fuzz | 865 session call sites; unit and fuzz compile lib `.c` (`tests/unit/session/st20_harness.c:39`, `tests/fuzz/st20/st20_rx_frame_fuzz.c:39`; `tests/unit/meson.build:20-21`, `tests/fuzz/meson.build:43-44`) | not blockers: the internal dependency; they keep testing the engine |
 
 The acceptance suite hard-codes `.local_install` and RxTxApp's legacy JSON kinds, and an `#error`
 at stage F+1 breaks builds that include a legacy header only for a type (GStreamer
@@ -650,9 +650,9 @@ RxTxApp's header-split, `st20r` and `uframe_pg_callback` paths and the user-sche
 
 ## 5. Today's modes: asymmetries the unified API removes
 
-Today: five families × two directions × up to three units × two layers, plus `st20rc` (20 session
+Today: four families × two directions × up to three units × two layers, plus `st20rc` (8 session
 and 8 pipeline create functions, each with its own ops struct and flag space; all cells verified
-at `545a266a`). Pipeline flag bits are not aligned with session bits (`ENABLE_RTCP` is bit 2 in
+at `a6fc9093`). Pipeline flag bits are not aligned with session bits (`ENABLE_RTCP` is bit 2 in
 `ST20_RX_FLAG_*`, bit 4 in `ST20P_RX_FLAG_*`), so each pipeline translates flags one by one
 (`st20_pipeline_rx.c:510-548`). The mode-by-mode map with milestones is [migration.md](migration.md)
 §4.16.

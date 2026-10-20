@@ -11,7 +11,7 @@ bibliography. Implementers check their code against it; testers write their orac
 builds on these facts are in [timing.md](timing.md) (media time, launch, sync), [contract.md](contract.md) (calls) and
 [nmos-ipmx.md](nmos-ipmx.md) (NMOS and IPMX); this file points to them instead of repeating them. Facts were read in the
 cited source unless marked *(inferred)* (reasoning or a secondary source) or *(unknown)* (not determinable from what was
-available). Code facts about MTL are at `545a266a`.
+available). Code facts about MTL are at `a6fc9093`, whose code is `main` @ `2fe5599f`.
 
 ## 1. Contents
 
@@ -875,7 +875,7 @@ big-endian, bit 0 the LSB:
 
 ### 13.3 MTL's built-in PTP client against ST 2059-2
 
-Code at `545a266a`. It works with one two-step grandmaster sending multicast UDP/IPv4 on the network; it does not meet
+Code at `a6fc9093`. It works with one two-step grandmaster sending multicast UDP/IPv4 on the network; it does not meet
 the profile's slave requirements:
 
 | Item | ST 2059-2 | Today | Evidence |
