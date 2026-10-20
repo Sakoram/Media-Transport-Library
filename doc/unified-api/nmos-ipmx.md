@@ -561,7 +561,7 @@ The property-by-property mapping is §14.
 
 - **IX-VID Uncompressed video subset** (v1, IPMX, met). Receivers take YCbCr 4:2:2 10-bit and
   RGB 4:4:4 8-bit: `MTL_YUV422_10`, `MTL_RGB_8`, `video.packing`, `MTL_INTERLACED`, `MTL_PSF`.
-- **IX-VID-RASTER Any raster and rate** (video MS2a; fastmeta MS4a1, ANC MS4a2; IPMX: the IPMX
+- **IX-VID-RASTER Any raster and rate** (video MS2a; ANC and fastmeta MS4a2; IPMX: the IPMX
   shaping of non-§6.3.1 rasters needs E5a (MS5) and the IPMX VRX (Phase 7). Until then such rasters
   are sent as ST 2110-21 type W, which an IPMX receiver with its 2 × CMAX buffer need not take.)
   Sizes up to the MIB's 16-bit fields, rates as rationals: `mtl_raster.fps`.

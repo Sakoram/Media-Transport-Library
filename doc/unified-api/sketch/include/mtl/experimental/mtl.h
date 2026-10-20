@@ -1174,9 +1174,10 @@ struct mtl_fastmeta_config {
                               segmentation); RX: filter */
   uint32_t k_bit;
   uint32_t fastmeta_flags;        /* MTL_FASTMETA_* */
-  uint32_t buffer_capacity_bytes; /* per unit, 0 = 64 KiB; a unit goes out as data items of
-                                     at most 359 words (1436 B), one per RTP packet, to fit
-                                     the 1460 B UDP limit (ST 2110-41 §5.4) */
+  uint32_t buffer_capacity_bytes; /* per unit. TX: one data item in one RTP packet (ST
+                                     2110-41 §5.4), at most sc.max_udp_payload - 16 (1436 B
+                                     at 1452), 0 = that, more -MTL_EINVAL. RX: 0 = 64 KiB,
+                                     the data items of one RTP timestamp */
   uint64_t reserved[10];
 };
 

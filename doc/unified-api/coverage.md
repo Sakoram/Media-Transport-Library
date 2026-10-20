@@ -365,10 +365,11 @@ because the pipeline ops and frame structs embed these types (§4).
 
 | U-ID | Legacy | Unified home | When | Notes |
 |---|---|---|---|---|
-| U-280 | TX one data item per frame: `ST40_TX_FLAG_FAST_METADATA` on a frame-level ST40 session (`st40_api.h:82-102`), `get_next_frame`, `st40_frame.data`/`data_size` (`meta[]` ignored), `st40_tx_get_framebuffer` | `sc.essence = MTL_FASTMETA`, `u.used` | MS4 | R; RXTX 1, KT 1, UT 3; S! |
+| U-280 | TX one data item per frame: `ST40_TX_FLAG_FAST_METADATA` on a frame-level ST40 session (`st40_api.h:82-102`), `get_next_frame`, `st40_frame.data`/`data_size` (`meta[]` ignored), `st40_tx_get_framebuffer` | `sc.essence = MTL_FASTMETA`, `u.used` | MS4a2 | R; RXTX 1, KT 1, UT 3; S!; a unified TX unit is one data item too, at most `sc.max_udp_payload` − 16 (D-247) |
 | U-281 | data item type and K bit: `st40_tx_ops.fmd_dit`, `fmd_k_bit` (TX only) | `f.data_item_type`, `f.k_bit` | MS4 | R; RXTX 4, KT 1, UT 2; S! |
-| U-282 | RX filter on DIT / K: none today; the `st41_rx_ops` filter (`0xffffffff` / `0xff` = off) went with st41 in `88d47ac83`, and ST40 RX in fast metadata mode has none | `MTL_FASTMETA_RX_MATCH_DIT`, `_MATCH_K` | MS4 | new; none in the library; RXTX 1 checks DIT and K itself (`rx_ancillary_app.c:128-131`). Unified, the filter changes with `MTL_UPDATE_MEDIA` in CREATED or STOPPED |
-| U-283 | RX (RTP only today): `ST40_RX_FLAG_FAST_METADATA` on an `ST40_TYPE_RTP_LEVEL` session (`st40_api.h:158`), `notify_rtp_ready` + `st40_rx_get_mbuf`; frame level is rejected (`st_rx_ancillary_session.c:1506-1509`) | frame-level RX is new; the raw path is U-345 | MS4 | R; RXTX 1, KT 1, UT 3; S!. CHANGED |
+| U-282 | RX filter on DIT / K: none today; the `st41_rx_ops` filter (`0xffffffff` / `0xff` = off) went with st41 in `88d47ac83`, and ST40 RX in fast metadata mode has none | `MTL_FASTMETA_RX_MATCH_DIT`, `_MATCH_K` | MS4a2 | |
+| U-282, continued | | | | new; the RX binding filters per data item at dequeue (D-247); none in the library today; RXTX 1 checks DIT and K itself (`rx_ancillary_app.c:128-131`). Unified, the filter changes with `MTL_UPDATE_MEDIA` in CREATED or STOPPED |
+| U-283 | RX (RTP only today): `ST40_RX_FLAG_FAST_METADATA` on an `ST40_TYPE_RTP_LEVEL` session (`st40_api.h:158`), `notify_rtp_ready` + `st40_rx_get_mbuf`; frame level is rejected (`st_rx_ancillary_session.c:1506-1509`) | frame-level RX is new; the raw path is U-345 | MS4a2 | R; RXTX 1, KT 1, UT 3; S!. CHANGED |
 | U-284 | user pacing, timestamp: `ST40_TX_FLAG_USER_PACING/USER_TIMESTAMP` with `ST40_TX_FLAG_FAST_METADATA` | `sc.media_mode`, `MTL_SUBMIT_*` | MS6 | R; RXTX 1 (the ANC flags, `tx_ancillary_app.c:524`); S! |
 | U-285 | rate and interlace: `st40_tx_ops.fps`, `interlaced` (no F bits in fast metadata mode) | `f.video` (raster), `MTL_FASTMETA_FREE_RUNNING` | MS4 | R; RXTX; S! |
 | U-286 | stats, update, queue meta: the ST40 calls on a fast metadata session, `st40_*_get/reset_session_stats`, `st40_tx_update_destination`, `st40_rx_update_source`, `st40_rx_get_queue_meta` | stats keys, `mtl_session_update`; queue meta: U-139 | MS4 (stats; `mtl_session_update` with the fastmeta binding, `when` NULL; at an instant MS5) | R; none; S! |
@@ -699,7 +700,7 @@ directions × up to three units of work × two layers, plus `st20rc`:
 | `st22_*`, `st22p_*` | `MTL_CVIDEO` | MS4b |
 | `st30_*`, `st30p_*` | `MTL_AUDIO` | MS4a; sample-accurate submission MS6 |
 | `st40_*`, `st40p_*` | `MTL_ANC` | MS4a2; ANC following its video in a start array MS6 |
-| `st40_*` with `ST40_*_FLAG_FAST_METADATA` (RX RTP level only today) | `MTL_FASTMETA`, frame RX added | MS4a |
+| `st40_*` with `ST40_*_FLAG_FAST_METADATA` (RX RTP level only today) | `MTL_FASTMETA`, frame RX added | MS4a2 |
 | `st20rc_rx_*` | none: removed (D-112); two legs on one session do the same | — |
 | `st22_encoder_register`, `st20_converter_register`, `st_plugin_register` | plugin ABI v2 (`mtl_plugin.h`) | MS4b; converter plugins on the transform state MS2b |
 | `st_convert_api.h` (per-pair converters) | `mtl_convert()` (`mtl_format.h`); the public per-pair converters are removed (D-112) | MS4b |

@@ -14,7 +14,7 @@ and a header disagree, the header wins.
 
 - A D-xx states one decision in its current form; **Where** names the document that specifies it,
   with its section where the row gives one (`contract.md §5.5`); a new row names its section.
-- IDs are stable, never renumbered or reused; the next free numbers are D-246 and OI-85.
+- IDs are stable, never renumbered or reused; the next free numbers are D-254 and OI-86.
 - D-12, D-20, D-22, D-25, D-28, D-29, D-35, D-40, D-46, D-61 and D-65 (superseded by D-78,
   D-80, D-74, D-82, D-44, D-50, D-77, D-55, D-73, D-79, D-72) and D-47 were dropped in
   `b7885ddf`; they stay unused.
@@ -44,7 +44,7 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | Launch, late and underrun policy | D-13, D-39, D-52, D-53, D-78, D-130, D-131, D-173, D-212, D-218–D-220, D-234, D-239, D-241, D-243 | — | timing.md |
 | RX | D-37, D-150, D-152, D-155, D-156, D-199, D-204, D-225, D-227, D-228, D-242 | OI-25, OI-26, OI-67, OI-73, OI-74, OI-84 | contract.md |
 | Formats and sender types | D-32, D-101, D-143, D-222 | OI-42, OI-71, OI-76, OI-77 | contract.md, timing.md |
-| ANC and fast metadata | D-67, D-70, D-145–D-149, D-157, D-201 | OI-45, OI-78 | contract.md, timing.md |
+| ANC and fast metadata | D-67, D-70, D-145–D-149, D-157, D-201, D-247 | OI-45, OI-78 | contract.md, timing.md |
 | Packets, RTP and legs | D-26, D-59, D-82, D-115, D-133, D-134, D-198, D-224, D-249 | OI-56 | contract.md, timing.md |
 | Options, stats, errors and logs | D-19, D-21, D-73, D-80, D-81, D-84, D-128, D-129, D-139, D-153, D-154, D-175, D-244 | OI-40, OI-50, OI-54, OI-65, OI-69 | contract.md, engine.md |
 | Headers and structs | D-05, D-33, D-34, D-45, D-71, D-72, D-74, D-97, D-104, D-105, D-137, D-140, D-185, D-187, D-195, D-217, D-223 | OI-70 | the headers, contract.md, README.md |
@@ -170,7 +170,7 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | D-122 | Superseded by D-158, D-159 (no wait handle: probes arm nothing, event loops arm a queue explicitly). Was: one wait handle per object (an eventfd; a Windows event from MS2a), made by the first `mtl_get_wait_handle`, whose mask it fixes; for event loops only, WT calls sleep on the wake word (D-141); a miss arms its target only when it is in the handle's mask | core.md |
 | D-123 | TX recovery (MS1, E1a) records a verdict (DROPPED, `RECOVERY`) in the slot and drops only software-held references; the last PMD reference (the free callback) publishes; two `sh_info` per engine frame alternate per use, a use generation in `fcb_opaque`, so a stale free never completes the next use (continued below the table). Amended by D-248: the pair is T-REP's | engine.md |
 | D-124 | The core sees an instance-context interface (socket-aware alloc, TSC or test clock, wake flush hook, scheduler ID), never `struct mtl_main_impl*`; a null-only instance skips `mtl_init`, starts EAL itself (`--no-huge --no-pci --in-memory`) or uses a running one, and loops on a library thread; under the test clock completions run inside `MTL_FAULT_CLOCK_ADVANCE` (G-92) | core.md |
-| D-125 | `st_engine_core.h` lists every engine entry point the bindings use besides the callbacks: a tasklet-callable RX frame put, the packet bitmap (MS2), "last packet handed" (MS2), the recovery verdict (MS1), per-leg arrival time, an RTP sequence seed (OI-62), an engine frame count ≥ pool_count + slot_max for RX_LATEST and BY_INDEX (E11); `st41_rx_set_unit_sink` (MS4a1, D-174) | engine.md |
+| D-125 | `st_engine_core.h` lists every engine entry point the bindings use besides the callbacks: a tasklet-callable RX frame put, the packet bitmap (MS2), "last packet handed" (MS2), the recovery verdict (MS1) (continued below the table). Amended by D-247: no `st41_rx_set_unit_sink`; fastmeta frame RX is the fast metadata mode of `st40_rx_set_unit_sink` (MS4a2) | engine.md |
 | D-126 | RX uses `query_ext_frame` with core-allocated slots from MS1, one RX path; delivery order is a per-session `pub_seq` fetch-added by the completer; TX library pools use the engine framebuffers in MS1 (OI-59) | core.md |
 | D-127 | One tick per session (MS2): TX in `tvs_tasklet_handler` (the builder; the transmitter calls nothing), RX in `rvs_pkt_rx_tasklet_handler` | core.md |
 | D-128 | Stats blocks are per scheduler: a completion on another scheduler (a shared TX queue) writes that scheduler's block, never a block another tasklet writes; a session allocates its home scheduler's, the application's and the library's blocks at create, and a foreign scheduler's on the control plane when a shared TX queue gains a session of that scheduler, never on a tasklet | engine.md |
@@ -179,7 +179,7 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | D-131 | The TX binding decides the launch at `get_next_frame` (video MS1) via `st_core_admit` (D-173), exactly (AUTO next feasible, late ON_TIME + `MTL_TXR_DEFERRED`; TAI nearest, SNAP_COLLISION, BEHIND, TOO_LATE DROPPED; EXACT checked, then `EXACT_USER_PACING`) (continued below the table). Amended by D-218: TAI nearest, moved by the session's launch delay L | timing.md, core.md |
 | D-132 | In MS1 AUTO is `CLOCK_TAI` if valid, else SYSTEM_TAI (vDSO); a PHC, one syscall per read, comes in MS6 with the published time base (E9) | timing.md |
 | D-133 | ST 2022-7: one RTP identity per session (`sc.ssrc`, `sc.payload_type`; 0 = one random SSRC per session, the essence's default PT); RX relocks only when the stale value lags the newest by more than `rx.skew_budget_ns` worth of ticks or every enabled leg is stale; ceil(skew_budget / TFRAME) + 1 out-of-order slots, else `info.tolerated_skew_ns` and a warning | timing.md, contract.md |
-| D-134 | DSCP lands with the bindings (`mtl_flow.dscp` into the TX builders' TOS; video MS1, the rest MS4); RTCP sender reports in MS5; FREERUN with E9 in MS6 (those names leave `MTL_LATER` then); any video frame rate in MS2a (C-FPS), fastmeta MS4a1, ANC MS4a2, cvideo MS4b; a rational outside the legacy table is `-MTL_ENOTSUP` until then | implementation-plan.md |
+| D-134 | DSCP lands with the bindings (`mtl_flow.dscp` into the TX builders' TOS; video MS1, the rest MS4); RTCP sender reports in MS5; FREERUN with E9 in MS6 (those names leave `MTL_LATER` then) (continued below the table). Amended by D-247: fastmeta any rate with ANC in MS4a2 (one ST40 create per direction) | implementation-plan.md |
 | D-135 | The implementing session commits per task after its gates pass (signed off through the mtl-commit skill, no AI attribution) on a work branch; it never pushes and never opens PRs; the maintainer reviews and pushes. Amended by D-245: the autonomous run pushes to the fork | implementation-plan.md |
 | D-136 | Tooling task P0 opens MS1: `run_gtest` gains `pacing_way`, `kernel:lo`, whitelisted args and `binary`; `mtl-developer` may edit the new trees of plan §4.1 and §4.2, the new pytest application, `.github/`, `build.sh`, `meson_options.txt`, `doc/unified-api/`; the frozen trees are BLOCKER paths for `mtl-reviewer` | implementation-plan.md |
 | D-137 | Counts (functions per header, frozen names, functions per milestone tag) come only from `check.sh`; a function's milestone is its header tag, a value's its row in the data tables (D-185), a feature's its coverage.md U-row; other documents link them | README.md |
@@ -219,7 +219,7 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | D-171 | The core's one interface below it is `struct st_core_binding_ops` (13 ops) plus 14 core calls a binding makes; the core never reads `essence`; the shell picks the binding from one table (binding set, essence, direction, unit); `TestBinding`, `bind_null` and every binding implement it; it is checkpoint 1's acceptance text | core.md §2, §2.1 |
 | D-172 | The shell validates options and stores the effective values, never an engine field; each option row names its owner (SHELL, CORE, BINDING); bindings alone build engine `ops`; a present key is never overwritten by a derived value (`OPTION_RANGE`); a binding key changed after create goes through the optional `set_option` op, else `-MTL_ENOTSUP` | core.md §2.6 |
 | D-173 | One launch decision for every TX essence: the pure core function `st_core_admit`, called by `st_core_tx_pick` at pick-up (continued below the table). Amended by D-234: C2b owns it in MS1, with the hysteresis (D-234) and the launch steps (D-218) | core.md §3.2, timing.md §6.2 |
-| D-174 | Two RX shapes: slot-RX for every frame and rows unit of every essence, ring-RX for packet units only; fastmeta frame RX is slot-RX through `st41_rx_set_unit_sink` (E16, MS4a1), as ANC's; `RX_BY_INDEX`, `RX_LATEST`, `RX_NO_FILL` are `-MTL_EINVAL` on packet units | core.md §2.2, contract.md §3.10 |
+| D-174 | Two RX shapes: slot-RX for every frame and rows unit of every essence, ring-RX for packet units only; fastmeta frame RX is slot-RX through `st41_rx_set_unit_sink` (E16, MS4a1), as ANC's (continued below the table). Amended by D-247: through the fast metadata mode of `st40_rx_set_unit_sink` (E12, N3, MS4a2); E16 withdrawn | core.md §2.2, contract.md §3.10 |
 | D-175 | `mtl_option_desc` carries `essence_mask`, `dir_mask` and `unit_mask`; a key that does not apply to a session (or an instance or port key on one) is `-MTL_EINVAL`, `NOT_APPLICABLE` (234), the reason `st_avail_check` also gives a flag or value outside its essence or direction; an instance default applies only to the sessions it fits | contract.md §12.1, §12.5 |
 | D-176 | The slot word's two spare bits next to X are `xs`, the transform stage (0 until Phase 7): a chain of at most four stages, TX convert → encode → encrypt, each a claim and done on one slot; the slot word is internal, not ABI | core.md §3.1 |
 | D-177 | The compatibility log lines the acceptance engine parses come from one file of the API shell, `compat_log.c`, as deltas of the core's cumulative counters at the stat dump; the core and the bindings keep no legacy counter; the file leaves at F+2 | core.md §1 |
@@ -292,6 +292,7 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | D-244 | Stats: `tx.units_repeated` removed; `tx.units_padded` → `tx.indices_filled`, a subset of `tx.indices_empty`; `rx.units_zero_filled` → `rx.units_filled` and `rx.bytes_zero_filled` → `rx.bytes_filled`, for every essence. Amends D-203. | contract.md §11.3 |
 | D-245 | The autonomous run (2026-10-16): agents implement MS1–MS7 with no maintainer available. Its process rules replace the maintainer's approvals, checkpoints and stop-and-ask for the run. Questions and plan bugs are decided by competing designers and a judge, and recorded as D-rows to confirm. Each commit is pushed to the fork branch `unified-api-impl`. Amends D-135 | autonomous-run.md |
 | D-246 | The legacy `BLOCK_GET` get (st20p MS2b; st22p, st30p, st40p MS4) is DP, then WT with the session's legacy wake mode; `wake_block` is LW1: a store to `lkick` on the in-flight line, then EVENT on lane 0. (continued below the table) | wait-protocol.md §3, migration.md §6.5 |
+| D-247 | Fast metadata after `88d47ac83` (a mode of the ST40 sessions, `st41_api.h` gone) is MS4a2's, the fast metadata mode of its ST40 engine work (continued below the table). | contract.md §3.3, core.md §2.2, implementation-plan.md §6.3 |
 | D-248 | E1a and REPEAT on main's `tv_frame_free_cb` (`8c9d48f3e`): E1a is MF1's claim (SF-39), MF7 and the recovery verdict with one `sh_info` per frame; the binding names a unit from its own record of the frame; the two alternating `sh_info` come with T-REP. (continued below the table) | engine.md §2.2, §5 |
 | D-249 | Kernel-socket TX on a FLOWS update: since `8224aba52` each packet goes to its header's destination, so G1a's template swap redirects it; the MS5 TX queue swap stays for `dscp` and `ttl`, which that backend holds as socket options, and for the old unit's packets still queued for the socket threads. (continued below the table) | engine.md §1.7, §2.17; core.md §5.4 |
 | D-250 | Under `ST_RX_VIDEO_NT_STORE`, an RX video or cvideo session without a packet lcore runs `_mm_sfence()` on its RX tasklet before any store that hands a unit or its buffer to another context outside `rv_frame_notify`, `rv_st22_frame_notify` and `rv_slice_notify`, (continued below the table) | engine.md §2.5; core.md §4.2; contract.md §9.12 |
@@ -315,14 +316,19 @@ Rows too long for the table, continued:
   by D-248: the two alternating `sh_info` and the use generation in `fcb_opaque` come with REPEAT
   (T-REP, MS4a1); E1a keeps one `sh_info` per frame, since nothing reuses a frame before its old
   mbufs are freed until then.
+- **D-125**, continued: per-leg arrival time, an RTP sequence seed (OI-62), an engine frame count ≥
+  pool_count + slot_max for RX_LATEST and BY_INDEX (E11); `st41_rx_set_unit_sink` (MS4a1, D-174)
 - **D-131**, continued: and drives the engine with `USER_PACING | RTP_TIMESTAMP_EPOCH`,
   `required_tai = N·T`; no `notify_frame_late`
+- **D-134**, continued: any video frame rate in MS2a (C-FPS), fastmeta MS4a1, ANC MS4a2, cvideo
+  MS4b; a rational outside the legacy table is `-MTL_ENOTSUP` until then
 - **D-142**, continued: If S1 fails: D-170's patterns, the slack gate, the notifier (D-165)
 - **D-150**, continued: `mtl_rx_provide` serves only destinations chosen per unit
 - **D-156**, continued: with two legs F is the configured `rx.skew_budget_ns`, not the measured
   `leg.observed_skew_ns`, so it stays stable
 - **D-173**, continued: fed by the binding's `struct st_core_grid` (index rate, first-packet offset
   per parity, pick-up lead, EXACT window, defer step, index bytes); D-131 stands; C2 owns it in MS1
+- **D-174**, continued: `RX_BY_INDEX`, `RX_LATEST`, `RX_NO_FILL` are `-MTL_EINVAL` on packet units
 - **D-203**, continued: its cost is in `rx.bytes_zero_filled`, not `convert_ns`; a close may wait
   out a conversion
 - **D-206**, continued: Why: a loop fed by threads needs no epoll
@@ -520,6 +526,24 @@ Rows too long for the table, continued:
   token on TX would undo `0d05bbd40`'s no-op (SF-91), and counters in the wrapper break the bool
   token (`legacy_wake.py`). Taken in the autonomous run (2026-10-20, D-245); to confirm by the
   maintainer
+- **D-247**, continued: TX: a frame unit is one data item, sent as one RTP packet on today's frame
+  path (`get_next_frame`, `st40_frame.data`/`data_size`; `used` 0 the zero-item keep-alive), so TX
+  `buffer_capacity_bytes` is at most `sc.max_udp_payload` − 16 (1436 B at 1452), 0 = that (RX stays
+  0 = 64 KiB); why: ST 2110-41 §7 is one bucket per stream, so several packets per unit leave only
+  four back to back and then one per 1.25 ms carried across units, which spreads a 64 KiB unit over
+  52.5 ms, past its frame and the receiver's due time, while the old text's per-unit reading breaks
+  §7 (`fastmeta_tx.py`); several items per unit go by packet units. RX: the fast metadata mode of
+  `st40_rx_set_unit_sink` (E12, N3): a newer timestamp ends a unit as ANC's marker does, with two
+  legs a sequence gap waits at most `rx.skew_budget_ns`, at most two units in flight, a late packet
+  is one of the last two published timestamps; COMPLETE when no sequence number from the previous
+  unit's last packet to the newer timestamp's first is missing (`fastmeta_rx.py`: the old "next
+  timestamp" text loses and reorders on two legs, "every leg passed" loses at a two-leg reorder and
+  waits for the due time on a dead leg). The DIT/K filter is the RX binding's, at dequeue. N1
+  declares the sink's format, N3 adds the mode with RXHDR, N2's timed create, TOS and E17 serve both
+  formats, N4f and N5f are the bindings, N7f `UnifiedRxTxApp`, the `fmd_*` copies and the sample;
+  MS4a1 keeps audio, T-REP and A/V sync. E16 and `st41_rx_set_unit_sink` are withdrawn, PE8 was done
+  on main, no fast metadata acceptance case exists (`30ce608b`). Taken in the autonomous run
+  (2026-10-20, D-245); to confirm by the maintainer. Amends D-125, D-134, D-174
 - **D-248**, continued: MF1's claim is a `refcnt` CAS 1 → 2 in `tv_frame_free_cb` and in legacy
   recovery's frame loop, then minus 2. MF7's reference is dropped also when recovery or teardown
   abandons a frame in build. Recovery records the verdict before it drops any reference. The video
@@ -688,6 +712,7 @@ or a named document. A row leaves the table when the code applies it; its ID is 
 | ID | Rule | Milestone |
 |---|---|---|
 | OI-68 | No phase relation between sessions and no `tx.phase_of`: the TAI-mode sessions of a programme add one δ = `mtl_grid_offset(anchor, video raster.fps)` (`mtl_sync.h`), computed once per programme and shared by the plugin; interlaced TAI units snap per parity on the frame grid; snap error ≤ 1 ns with times exact to the ns (timing.md §4.3 and §10.5) | MS1 (helper, parity), MS4a (recipes) |
+| OI-85 | The fastmeta keep-alive below 20 units/s: timing.md §6.4's "one packet with no data item once nothing was sent for 450 ms" leaves gaps above ST 2110-41 §5.1's 500 ms on the grid (600 ms at 5 fps, 1000 ms at 1 fps; the legacy-table rates, 23.98 and up, meet it). Decided by autonomous-run.md §4 before N4f's card is written: a keep-alive off the grid, or a refusal | MS4a2 |
 
 ### 5.7 Further issues
 

@@ -89,8 +89,9 @@ flowchart TB
 | **MS2a** ST 2110-20 rows and completeness | the nightly comparison (§8.8); the wake checks S1a and S1b; queues for event loops (ex03); the `tick`, command acks, discard; **rows (slice)**; RX fill of library pools (video black), due time and `RX_LATEST`; the direct open of PCI and `native_af_xdp:` ports; `mtl_log_add_sink`; C-FPS, C-GRANT, C-BRIDGE; the MS1 stretch tasks (§6.1) | month 2 |
 | **MS2b** video memory and the st20p re-base | attach, by index with the video RX `media_index`, per-acquire layouts, holds, split-forward, converter plugins; then, last, st20p re-based on the core once the nightly comparison has burned in (§6.1) | month 3 |
 | **MS3** timing and observability | the ST20 timing subset (INDEX, start at TAI or index, `mtl_tx_get_next`, E1–E3); events, per-scheduler stats blocks, health; `mtl_session_update` on a stopped session, and FLOWS on a running one (G1); the libmtl soname, the `MTL_LEGACY` node and hidden internals; debug call-class checks; the FFmpeg plugin's st20p path on the new API (§6.2) | month 4 |
-| **MS4a1** audio, fastmeta and A/V sync | audio (st30p re-based), fastmeta (st41 frames), A/V on one epoch timeline (media mode AUTO; audio TAI and INDEX MS6); video `MTL_UNDERRUN_REPEAT` (T-REP); fastmeta at any frame rate; DSCP on their bindings; their `UnifiedRxTxApp` kinds and `UnifiedKahawaiTest` cases (§6.3) | month 5 |
-| **MS4a2** ANC | ANC (st40p re-based) at any frame rate, DSCP on its binding, its `UnifiedRxTxApp` kinds and `UnifiedKahawaiTest` cases, EBU LIST (tasks N1–N8, §6.3); its files are disjoint from MS4a1's, so it runs beside MS4a1 | month 5 (run after MS4a1, it moves MS4b and later by about 4 weeks) |
+| **MS4a1** audio and A/V sync | audio (st30p re-based), A/V on one epoch timeline (media mode AUTO; audio TAI and INDEX MS6); video `MTL_UNDERRUN_REPEAT` (T-REP); DSCP on the audio bindings; their `UnifiedRxTxApp` kinds and `UnifiedKahawaiTest` cases (§6.3) | month 5 |
+| **MS4a2** ANC and fastmeta | ANC (st40p re-based) and fastmeta (the fast metadata mode of the same ST40 engine work, D-247) at any frame rate, DSCP on their bindings, their `UnifiedRxTxApp` kinds and `UnifiedKahawaiTest` cases, EBU LIST (tasks N1–N8, N4f, N5f, N7f, §6.3); its engine, binding and app files are disjoint from MS4a1's, so it runs beside MS4a1 | |
+| **MS4a2** ANC and fastmeta, continued | | month 5 (run after MS4a1, it moves MS4b and later by about 5 weeks) |
 | **MS4b** compressed video and plugins | cvideo (st22p re-based; codec plugins on the transform state) and its rates (JPEG XS n and n·1000/1001), cvideo REPEAT (JPEG XS), plugin ABI v2, `mtl_convert`'s conversions, its CHECK since MS2a (§6.3) | month 6 |
 | **MS5** packets and operators | packet units on every essence over today's RTP paths (one shared chunk expander, PE1–PE8), the generic `MTL_RTP` essence and ST 2022-6 (PE7); E5a (linear NL and W, D-143); `mtl_session_update` at an instant (legs, launch delay); RTCP sender reports on TX (their names leave `MTL_LATER`); the link monitor, capacity query, manager reconnect (§6.4) | month 7 |
 | **MS6** synchronisation and the ecosystem | start arrays, ANC and fastmeta following their video, sample-accurate audio, E5b–E13, the published time base with FREERUN (E9; its name leaves `MTL_LATER`); recovery on library workers; the GStreamer, OBS, Python and Rust ports and the rest of the FFmpeg plugin (§6.5) | months 8–9 |
@@ -434,7 +435,7 @@ pattern and a file source. The legacy `sample_util.*` is deleted with the last l
 | `rx_into_memory` | ex11 | MS2b | `ext_frame/rx_st20_pipeline_dyn_ext_frame_sample.c`, `gpu_direct/rx_st20_pipeline_gpu_direct.c` | `--mxl` or `--record` (`mtl_rx_provide`), `--device` (MS6) |
 | `split_forwarder` | ex12 | MS2b | `fwd/rx_st20_tx_st20_split_fwd.c`, `fwd/rx_st20p_tx_st20p_split_fwd.c`, `fwd/rx_st20p_tx_st20p_merge_fwd.c`, `legacy/rx_st20_tx_st20_fwd.c` | `--merge` (four HD into one 4K, by copy) |
 | `audio` | ex13 | MS4a1 | `tx_st30_pipeline_sample.c`, `rx_st30_pipeline_sample.c` | `--tx` or `--rx` |
-| `fastmeta` | — | MS4a1 | — | `--tx` or `--rx` (the copy path of ex13, which names the fast metadata fields) |
+| `fastmeta` | — | MS4a2 | — | `--tx` or `--rx` (the copy path of ex13, which names the fast metadata fields) |
 | `anc` | ex14 | MS4a2 | `tx_st40_pipeline_sample.c`, `rx_st40_pipeline_sample.c` | `--tx` or `--rx` |
 | `cvideo` | ex15 | MS4b | `tx_st22_pipeline_sample.c`, `rx_st22_pipeline_sample.c`, `legacy/tx_st22_video_sample.c`, `legacy/rx_st22_video_sample.c` | `--plugin <so>` |
 | `pod_service` | ex16 | MS2a (health and the shutdown report MS3) | — | |
@@ -1646,43 +1647,50 @@ needs `MTL_MEDIA_INDEX`, MS3); the `ptp` group green on both applications.
 ### 6.3 MS4: every essence
 
 **MS4a1**: audio (st30p re-based (its ledger rows decided first, as RB0); E6 carry buffer; E17,
-the uncached TX pools), RX header extensions on these essences (RXHDR), fastmeta (a frame binding
-over the st41 session; RX frames on core slots through `st41_rx_set_unit_sink`, E16, as ANC's);
-A/V sync on the epoch timeline; fastmeta at any rate, through the rate entry of C-FPS
-(until then a rational outside the legacy table is `-MTL_ENOTSUP`); DSCP on these bindings; the
-essence members of `mtl_session_config`; RxTxApp kinds `st30p` and `"fastmetadata"` with
-`"type": "frame"` in `UnifiedRxTxApp`; their suites copied into `UnifiedKahawaiTest` (D-109);
-their acceptance directories on both applications; ex13 runs (ex14 at the exit of MS4a2, ex15
-at that of MS4b). **T-REP** (D-239, D-240, D-212, D-248): video `MTL_UNDERRUN_REPEAT` with the
-two alternating `sh_info` per engine frame its use records sit on ([engine.md](engine.md) §2.2),
-about 1.3 k lines with the pin cases, one review unit under the commit cap, the Gate 6 legacy gate on TSC
-and RL, its files disjoint from audio and fastmeta; G-164, G-165, G-166, G-143's, G-145's and
-G-163's REPEAT cases. The fastmeta SKIP refusal (a create check, about 5 lines). Each essence
-binding of MS4a1, MS4a2 and MS4b brings its running FLOWS path with its `tick` (about 40 lines
-each), and its `update_*` gtests are ported. The dense-audio reference load is
-measured in the three shapes of D-170 (OI-80); D-164 and D-166 are built only if a budget of §8.4
-fails.
+the uncached TX pools of audio), RX header extensions on audio (RXHDR); A/V sync on the epoch
+timeline; DSCP on the audio bindings; the essence members of `mtl_session_config`; the RxTxApp
+kind `st30p` in `UnifiedRxTxApp`; its suites copied into `UnifiedKahawaiTest` (D-109); its
+acceptance directories on both applications (fast metadata is MS4a2's, D-247); ex13 runs (ex14 at
+the exit of MS4a2, ex15 at that of MS4b). **T-REP** (D-239, D-240, D-212, D-248): video
+`MTL_UNDERRUN_REPEAT` with the two alternating `sh_info` per engine frame its use records sit on
+([engine.md](engine.md) §2.2), about 1.3 k lines with the pin cases, one review unit under the
+commit cap, the Gate 6 legacy gate on TSC and RL, its files disjoint from audio; G-164, G-165,
+G-166, G-143's, G-145's and G-163's REPEAT cases. Each essence binding of MS4a1, MS4a2 and MS4b
+brings its running FLOWS path with its `tick` (about 40 lines each), and its `update_*` gtests are
+ported. The dense-audio reference load is measured in the three shapes of D-170 (OI-80); D-164 and
+D-166 are built only if a budget of §8.4 fails.
 
-**MS4a2**: ANC (st40p re-based; E7 RTP from media time; E17 for the ANC TX pools; the ST 2110-40 window and keep-alive; UDW,
-SF-78/SF-79: 10-bit user words and per-packet error skipping), RXHDR on ANC, ANC at any rate
-through the same rate entry, DSCP on its binding; RxTxApp kinds `st40p` and `"ancillary"` in
+**MS4a2**: ANC (st40p re-based; E7 RTP from media time; E17 for the ST40 TX pools; the ST 2110-40
+window and keep-alive; UDW, SF-78/SF-79: 10-bit user words and per-packet error skipping), RXHDR on
+the ST40 RX (N3), ANC and fastmeta at any rate through the same rate entry (the ST40 creates, N2 and
+N3), DSCP on their bindings (the one ST40 TOS template, N2); fast metadata as the fast metadata mode
+of this engine work (D-247): a TX unit is one data item on today's frame path, RX the mode of N3's
+sink, the bindings N4f and N5f, its `UnifiedRxTxApp` keys, `fmd_*` copies and sample N7f (no fast
+metadata acceptance case exists since `30ce608b`); RxTxApp kinds `st40p` and `"ancillary"` in
 `UnifiedRxTxApp`, the `St40*` suites copied into `UnifiedKahawaiTest`, the ANC acceptance
-directories on both applications. Its files (the ANC bindings, the st40 engine,
-`st40_pipeline_*`) are disjoint from MS4a1's, so it runs beside MS4a1; run after it, MS4b and
-later move by about 4 weeks. Until MS4a2 lands, st40p runs on its legacy path with only SF-87 and
-SF-88. Each task is one review unit (§5.8), each commit under the commit cap (D-107) with its
-tests, through `mtl-reviewer`; N6a and N6b split the st40p rewrite (1 570 lines, deletions counted) under the cap:
+directories on both applications. Its files (the ANC and fastmeta bindings, the st40 engine,
+`st40_pipeline_*`) are disjoint from MS4a1's, so it runs beside MS4a1 (the shared tables, `.def`
+rows, `parse_json.c` and the sample list, take milestone order); run after it, MS4b and later move
+by about 4 weeks. Until MS4a2 lands, st40p runs on its legacy path with only SF-87 and SF-88. Each
+task is one review unit (§5.8), each commit under the commit cap (D-107) with its tests, through
+`mtl-reviewer`; N6a and N6b split the st40p rewrite (1 570 lines, deletions counted) under the cap:
 
 | Task | Content | Depends | Lines (lib + tests) | Exit |
 |---|---|---|---|---|
-| N1 | the planner, the launch rule with the link term, the system table and the raster map, as pure functions (`st_ancillary.c`); the `st_engine_core.h` declarations | — | 350 + 450 | UB: planner and schedule parts of G-116, G-117 |
+| N1 | the planner, the launch rule with the link term, the system table and the raster map, as pure functions (`st_ancillary.c`); the `st_engine_core.h` declarations, with the unit sink's format (RFC 8331 or fast metadata, D-247) | — | 360 + 450 | UB: planner and schedule parts of G-116, G-117 |
 | N2 | engine TX: the unit source (wire records, header and payload copy, burst 16), the carrier, RTP from the meta, the transmitter drain, SF-87 and SF-88 for legacy, no per-frame `st40_frame` | N1 | 400 + 350 | UB: G-115 (wire), G-121; legacy gate with G-99 and G-122 |
-| N3 | engine RX: the unit sink, payload copy and records in sequence order, the sized bitmap, the gap wait, drops, the PsF end rule, no `udw_buf` | N1 | 350 + 350 | UB: G-118 (wire part) |
+| N3 | engine RX: the unit sink, payload copy and records in sequence order, the sized bitmap, the gap wait, drops, the PsF end rule, no `udw_buf`; RXHDR and the RX timed create for both formats; the fast metadata mode ([engine.md](engine.md) E12 detail, D-247) | N1 | 410 + 600 | UB: G-118 (wire part); G-167 (RX), `St40RxFmdSinkTest.*`; `St40RxFmdTest.*` unchanged |
 | N4 | the TX binding and API shell: config and create checks (the window check), the slot layouts and wire areas, submit (check and encode in one pass, launch offsets), pick-up and the late policy, the keep-alive cursor, results, info and requirements; `anc.max_packets` (below) | N2, core MS1–MS3 | 750 + 550 | U: G-119, G-120, `UnifiedAnc.*` (below); UB: G-61, G-116, G-117 |
 | N5 | the RX binding: the sink over core slots, publication, dequeue decode, flags and status on the finished unit, `mtl_rx_detail` counts; the fuzz harness `tests/fuzz/unified/anc_rfc8331_fuzz.c` and its corpus replayed by a `UnifiedUnitTest` case | N3, N4 | 500 + 550 | U and UB: G-118 at the API; the fuzz corpus replay green |
+| N4f | the fastmeta TX binding (D-247): config and create checks (DIT, K, PT, SKIP refused, `buffer_capacity_bytes` at most `sc.max_udp_payload` − 16, again at a `MTL_UPDATE_MEDIA`), the slot layout, `get_next_frame` on today's frame path (frame 0 with the slot's one data item, the carrier 1 with `data_size` 0), pick-up and the late policy, the 450 ms keep-alive cursor, results, | | | |
+| N4f, continued | info and requirements, its FLOWS `tick` on N4's ST40 TX tick, `fastmeta.items`, `fastmeta.keepalives` | N2, N4, N5 | 300 + 400 | U: `UnifiedFastmeta.Tx*`; UB: G-61 (fast metadata), G-167 (TX), the `St40TxFmdTaskletTest` pins of D-247 |
+| N5f | the fastmeta RX binding: the sink's fast metadata mode over core slots, publication, `RX_LATEST`, the due time and discard; | | | |
+| N5f, continued | dequeue walks the data items (length not 0, inside the packet), applies `MTL_FASTMETA_RX_MATCH_DIT` / `_K`, copies the contents in sequence order, `used` 0 for a keep-alive, INCOMPLETE and the zero fill, `mtl_rx_detail` counts, `rx.pkts_rejected{cause=fmd_filter}` | N3, N5, N4f | 300 + 400 | U and UB: `UnifiedFastmetaRxUb.*`, G-167 at the API |
 | N6a | st40p TX re-based on the core with the legacy codec (encode at `put_frame`) | N4, the st40p ledger rows (migration.md §6.5) | about 750 | the frozen `St40p*` TX cases green; G-122 |
 | N6b | st40p RX re-based (decode at `get_frame`) | N6a, N5 | about 750 | the frozen `St40p*` RX cases green; G-122 |
-| N7 | `UnifiedRxTxApp` kinds, the `St40*` copies in `UnifiedKahawaiTest`, ANC acceptance on the unified app | N5 | copies + 400 | I and A green |
+| N7 | `UnifiedRxTxApp` kinds, the `St40*` copies in `UnifiedKahawaiTest` (their `fmd_*` cases with N7f), ANC acceptance on the unified app | N5 | copies + 400 | I and A green |
+| N7f | `UnifiedRxTxApp`: the `"fast_metadata"`, `"fastmetadata_data_item_type"`, `"fastmetadata_k_bit"` and `"ancillary_url"` keys of `"ancillary"` at `"type": "frame"`, RX on frame units with the app's reference, order and 500 ms checks; | | | |
+| N7f, continued | the frame-level `St40_tx.fmd_*` and `St40_rx.fmd_*` cases in the `UnifiedKahawaiTest` copy, plus a two-leg case and the DIT/K filter (the RTP-level ones go with MS5's packet units); the `fastmeta` sample | N7, N5f | about 450 | I green on VFs: the `fmd_*` copies, the sample `--tx`/`--rx`, a `"fast_metadata"` TX→RX loop |
 | N8 | EBU LIST on CTM and LLTM per pacing class; PsF against a third-party receiver | N7 | — | G-117 BE → P |
 
 N4's `anc.max_packets` is 1–65 535 (OI-78), default 32, with the word sum check
@@ -1726,7 +1734,7 @@ launch delay at a boundary (D-237, G-162); the RTP sequence seed of OI-62; MS5 s
 300 lines, since G1 (MS3) brings the running FLOWS path;
 RTCP sender reports on TX (driven by options, the library builds the Info Block; their names leave `MTL_LATER`), the link
 monitor, leg admin state, `MTL_QUERY_CHECK_CAPACITY`, MtlManager reconnect. `UnifiedRxTxApp`
-`"type": "rtp"`, the 61 RTP-level gtest sites, the st41 acceptance tests and pcap replay on the
+`"type": "rtp"`, the 61 RTP-level gtest sites and pcap replay on the
 unified path. Exit: G-PKT-1…7, the scheduled-update gtests, a 2022-6 stream accepted by a
 third-party receiver.
 
@@ -1773,8 +1781,8 @@ libmtl_sdp, unless NX-4 came earlier) and IPMX timing
 without PTP ([nmos-ipmx.md](nmos-ipmx.md)), after MS7 (D-98); every name of it is under
 `MTL_LATER` until then. Engine items that IPMX products need on any API and that have no
 milestone yet (IGMPv2, the `update_destination` fixes) are bugfixes and may be pulled into an
-earlier milestone when a user asks; DSCP (MS1, MS4a, MS4b), any frame rate (video MS2a, fastmeta
-MS4a1, ANC MS4a2, cvideo MS4b) and RTCP sender reports (MS5) have theirs.
+earlier milestone when a user asks; DSCP (MS1, MS4a, MS4b), any frame rate (video MS2a, ANC and
+fastmeta MS4a2, cvideo MS4b) and RTCP sender reports (MS5) have theirs.
 
 ### 6.8 The Kubernetes track
 
@@ -1868,7 +1876,7 @@ call.
 
 The index of the guarantees whose exit falls in MS1–MS3, by the first milestone that needs them.
 Each guarantee's text, tier, P or BE, milestone and full test method is its entry in
-[guarantees.md §2](guarantees.md#2-guarantees-g-01g-166); "M" is the milestone whose exit needs
+[guarantees.md §2](guarantees.md#2-guarantees-g-01g-167); "M" is the milestone whose exit needs
 it. "Test" names the cases or jobs that carry it, "Pool" the list of the MS1 test pool (§5.3) that
 runs them; — means none is named.
 
@@ -2017,7 +2025,7 @@ G-14, G-17, G-18, G-58, G-59, G-87, G-106 and G-115 (the helper part).
   litmus shapes, or the hook tests on an Arm runner.
 
 Later milestones ([guarantees.md](guarantees.md) has each entry): G-10…G-16, G-35…G-37, G-60,
-G-78, G-83, G-84, G-96, G-100…G-102 (MS2b for video); G-27, G-34 (MS4a, MS4b); G-61 (MS4a: ST40 MS4a2, ST41 MS4a1), G-66 (MS4b); G-164…G-166 (MS4a1); G-75 at an instant, G-89…G-91, G-98, G-162 (MS5); G-146, G-152 (MS6); G-17, G-18, G-21, G-22
+G-78, G-83, G-84, G-96, G-100…G-102 (MS2b for video); G-27, G-34 (MS4a, MS4b); G-61, G-167 (MS4a2), G-66 (MS4b); G-164…G-166 (MS4a1); G-75 at an instant, G-89…G-91, G-98, G-162 (MS5); G-146, G-152 (MS6); G-17, G-18, G-21, G-22
 (with TLINE/2), G-23…G-25, G-59 at M, G-62, G-67, G-68, G-86, G-104, G-105, and G-44,
 G-54, G-55, G-58 at I (MS6); G-63 with created timelines (not in v1).
 
@@ -2354,8 +2362,8 @@ writing. The calendar of §1.2 assumes:
 | MS2a | about 11 (C1q1, C1q2 and the shared join added) | about 9.7 k (with the black fill, about 265; C-BRIDGE's recognition, 120; `rx_to_framework`, 200; `MTL_CONVERT_CHECK` and its test) | 4 |
 | MS2b | about 8 (RB0–RB2) | about 6.45 k (6.3 k + the video RX `media_index`, 0.15 k, from MS3) | 3–4 |
 | MS3 | about 14: 13 + G1 (AUTO's move is a commit inside the time-events item) | about 11.5 k: 10 k − the RX `media_index` 0.15 k + G1 about 1.05 k + AUTO's move 0.44 k + the timing-subset additions 0.12 k + the suggestion rows and the name check 0.05 k | 3.5–4 (3.5 at four units a week) |
-| MS4a1 | about 7 (E16, E17, the dense measurement, T-REP) | about 6.1 k | 3–4 |
-| MS4a2 | 9 (N1–N8 with N6a and N6b), beside MS4a1 | about 7.2 k (the exported codec and its fuzz harness) | 4 |
+| MS4a1 | about 5 (E17, the dense measurement, T-REP) | about 3.7 k | 2.5–3 |
+| MS4a2 | 12 (N1–N8 with N6a and N6b, N4f, N5f, N7f), beside MS4a1 | about 9.4 k (the exported codec and its fuzz harness; fast metadata about 2.2 k, D-247) | 5 |
 | MS4b | about 10 | about 7 k | 4 |
 | MS5 | about 13 | about 8.7 k (G1 moved about 300 lines into MS3) | 4–5 |
 | MS6 | about 16 | about 12 k, plus E9's AUTO PHC move (about 305), GstMtlClock, the basesink rewrite and the port registry | 6–8 |

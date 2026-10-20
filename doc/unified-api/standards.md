@@ -582,7 +582,11 @@ protected-code-safe by construction; raw 10-bit UDWs need the §9.1 check *(infe
   1336 B, `include/st40_api.h:98-99`). Bigger objects need several packages (Annex A or the item's own
   method) *(inferred)*.
 - **Bursts.** With RNOMINAL below 172 800 packets/s, CMAX = 4, and below 727 packets/s the drain is 800/s: a sender may
-  put at most about 4 packets back to back, then one per 1.25 ms *(inferred)*. There is no frame-relative window as in
+  put at most about 4 packets back to back, then one per 1.25 ms *(inferred)*. The bucket is the stream's, not a unit's:
+  four back to back at each unit breaks it once units follow closely, and a drain faster than 1.25 ms taken from an
+  expected rate breaks it on bursty content; four, then one per 1.25 ms carried across units, meets it at any RNOMINAL
+  and spreads a 64 KiB unit (46 packets) over 52.5 ms, longer than a frame above 19 Hz (`design/models/fastmeta_tx.py`,
+  D-247) *(inferred)*. There is no frame-relative window as in
   -40, so -41 is the one essence where a sender cannot assume a video grid *(inferred)*; the unified API keeps 90 kHz and
   leaves item-defined clocks for later ([timing.md §9.3](timing.md#93-fastmeta-st-2110-41)).
 - **Text defects.** §9.2.2 writes the SSN as `SMPTE2110-41:2024`, §6 as `ST2110-41:2024`; §6 is the SDP rule and matches

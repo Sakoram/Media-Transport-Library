@@ -72,6 +72,8 @@ confirm. One row each; the D-row holds the decision itself.
 | 2026-10-20 | R0, question SMALL (DQ5) | the bounded DMA busy-poll on the RX tasklet (`f64db786a`), per newer RTP timestamp | D-251 | `r0/design/small/verdict.md`; `sm-c-dq5_flush_model.py`; `St20RxDmaTest.*`, `St20RxDmaRedundantTest.*` |
 | 2026-10-20 | R0, question SMALL (DQ6) | EK4/EK5 partly on main; the exit unlink orphans a second manager, every pytest session orphans the run's; main pins `0666` | D-252 | `r0/design/small/verdict.md`; `sm-a/manager_lock_model.py`, `sm-c-dq6_manager_model.py`; `MtInstanceManagerGoneTest.*` |
 | 2026-10-20 | R0, question SMALL (DQ7) | the TSC-init queue-rate clear is compiled out on this host's DPDK 26.03.91 | D-253 | `r0/design/small/verdict.md`; `sm-c-dq7_check.py`; `MtDevRlTeardownTest.*` |
+| 2026-10-20 | R0 | FM: fast metadata after `88d47ac83` (a mode of the ST40 sessions): where its binding and engine work live, the multi-packet TX unit, PE8, the lost acceptance case, who filters DIT/K, migration §4.12 | D-247 | `/home/labrat/wip/unified-api-impl/r0/design/fm/verdict.md`; |
+| 2026-10-20, continued | | | | models `design/models/fastmeta_rx.py`, `fastmeta_tx.py` (`/home/labrat/wip/unified-api-impl/r0/design/fm/judge/rx_judge.out`, `judge/tx_judge.out`, `judge/files_pick.out`, `judge/check_added_cases.out`); `check.sh` with every edit (`judge/check-sh-all-edits.out`); `UnitTest --gtest_filter='St40*'`: 256 passed |
 
 ## 4. Blocked outside the run
 

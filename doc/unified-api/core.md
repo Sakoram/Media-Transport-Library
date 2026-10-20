@@ -175,7 +175,7 @@ flowchart TB
 - **The internal engine interface** is the former session API (`st2x_*_create`, the `ops`
   structs, the callbacks). It has no ABI user left, so from F+2 it changes like any internal
   interface: the `st_engine_core.h` setters that exist only because a legacy struct was frozen
-  (`st40_tx_set_unit_source`, `st40_rx_set_unit_sink`, `st41_rx_set_unit_sink`, the tasklet RX
+  (`st40_tx_set_unit_source`, `st40_rx_set_unit_sink`, the tasklet RX
   frame put) may fold into the `ops` or the callbacks. Until F+2 no legacy struct layout changes.
 - **What leaves**: the `st*p_*` wrappers with the pipeline headers (F+2 or later, set at the MS4
   exit); the bridge `mtl_instance_from_legacy` with the legacy tier (migration.md §6.2);
@@ -301,11 +301,14 @@ An RX unit takes one of two shapes, and the binding's grant names which (D-174):
 | `missed_before`, per-unit `mtl_rx_get_detail` | yes | no |
 | `unit.hold`, `mtl_release` from any thread | yes | yes ([contract.md](contract.md) §13) |
 
-Fastmeta frame RX is slot-RX through `st41_rx_set_unit_sink` ([engine.md](engine.md) §2.11, E16, MS4a1), the pattern of
-ANC's sink: the engine assigns a core slot per new RTP timestamp, copies each data item into the
-slot's wire area, and the unit is published when a packet of the next timestamp arrives or its due
-time passes. So every slot rule holds for every frame unit with one definition, and ring-RX is the
-packet path only.
+Fastmeta frame RX is slot-RX through the fast metadata mode of ANC's sink, `st40_rx_set_unit_sink`
+([engine.md](engine.md) §2.11, E12, MS4a2; D-247): the engine assigns a core slot per new RTP
+timestamp and copies each packet's payload into the slot's wire area by sequence distance. ST
+2110-41 has no marker, so a newer timestamp ends the unit as ANC's marker does: with two legs a
+sequence gap from the previous unit's last packet waits for the other leg at most
+`rx.skew_budget_ns`, at most two units are in flight, and the due time ends what is open
+([contract.md](contract.md) §3.3). The binding gathers the data items at dequeue. So every slot
+rule holds for every frame unit with one definition, and ring-RX is the packet path only.
 
 ### 2.3 Bindings per essence
 
@@ -322,7 +325,9 @@ and the engine work it needs.
 | cvideo TX/RX (MS4) | the ST22 `get_next_frame` (`st_tx_video_session.c:2461`) and RX callbacks; codecs on the transform state | per-unit status, stats, CBR (E10), SF-42 |
 | audio TX/RX (MS4) | `get_next_frame` (`st_tx_audio_session.c:765`), done, RX ready | "last packet handed" (done fires at build today, `:922-924`); media time from the sample index; carry buffer (E6) |
 | ANC TX/RX (MS4a2) | see ANC below | E7, E12, UDW |
-| fastmeta TX/RX (MS4a1) | TX: `get_next_frame` (`st_tx_ancillary_session.c:1018`), done. RX: `st41_rx_set_unit_sink` gives a core slot per new RTP timestamp, slot-RX (§2.2); today fast metadata is an RTP-level ST40 mode (`st_rx_ancillary_session.c:663`, `:694`; frame level refused, `:1507-1510`) | keep-alive; the unit sink (E16) |
+| fastmeta TX/RX (MS4a2) | TX: `get_next_frame` (`st_tx_ancillary_session.c:1018`) returns frame 0 with `st40_frame.data`/`data_size` at the slot's one data item (D-247), or the carrier 1 with `data_size` 0 for the keep-alive, as ANC's; done. | |
+| fastmeta TX/RX (MS4a2), continued | RX: the fast metadata mode of `st40_rx_set_unit_sink` gives a core slot per new RTP timestamp, slot-RX (§2.2); the binding decodes the data items at dequeue and applies `MTL_FASTMETA_RX_MATCH_DIT` / `_K` there. Today fast metadata is an RTP-level ST40 mode (`st_rx_ancillary_session.c:663`, `:694`; frame level refused, `:1507-1510`) | |
+| fastmeta TX/RX (MS4a2), continued | | the fast metadata mode of E12 (N3); the ST40 tick, timed create and TOS template that N2 and N4 land for ANC |
 | packet units, every essence (MS5) | one shared chunk expander on the TX tasklet (header mbufs plus extbuf attaches, one `shinfo` per chunk whose `free_cb` completes the chunk) feeding the engine's existing RTP ring; RX chunks made at dequeue from `rtps_ring` (ring-RX, §2.2) | PE1 as one helper (about 250 lines [inferred]) + about 10 lines per TX engine where it dequeues `packet_ring`; PE2–PE8 |
 | null | none: completes units at the launch instant `st_core_admit` gives with the null grid (§3.2) on the instance clock (synchronously under the test clock) and loops each TX unit to the RX sessions whose flow matches (§2.4) | none |
 

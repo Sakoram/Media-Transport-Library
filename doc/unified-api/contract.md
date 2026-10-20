@@ -593,7 +593,7 @@ unresolved.
 | `cvideo` | `raster`, `codec`, `codestream_bytes` (CBR bytes, or the VBR ceiling, per unit) | `rate_mode` 0 = `MTL_CVIDEO_CBR`; `app_format` 0 = the application gives the codestream, else a codec plugin encodes; colour as video; no TROFFSET (ST 2110-22 §5.3: no virtual receiver buffer); `sender_type` shapes the network model only: N on the ST 2110-21 §6.3.1 formats, NL elsewhere (MS4b, D-143) |
 | `audio` | `format`, `sample_rate`, `channels` | `ptime` 0 = 1 ms; `unit_samples` 0 = 10 ms in whole packets (RX unit, TX pool capacity) |
 | `anc` | `video.fps` (and scan), unless a video session is in its start | `video` all zero = the raster and launch delay of the first video session of its start (`-MTL_EINVAL`, `FIELD_REQUIRED`, if none); `max_packets`, `max_udw_words`, `word_mode` and `timing_model` below; `detect` 0 = `MTL_DETECT_AUTO`, on for ANC (interlace from the F bits) |
-| `fastmeta` | as ANC; with `MTL_FASTMETA_FREE_RUNNING` the own rate in `video.fps`, always required | `buffer_capacity_bytes` 0 = 64 KiB (bounds the whole unit, below); RX filters on `data_item_type` and `k_bit` only with `MTL_FASTMETA_RX_MATCH_DIT` / `MTL_FASTMETA_RX_MATCH_K` |
+| `fastmeta` | as ANC; with `MTL_FASTMETA_FREE_RUNNING` the own rate in `video.fps`, always required | `buffer_capacity_bytes`: TX one data item, 0 = the largest (below); RX 0 = 64 KiB; RX filters on `data_item_type` and `k_bit` only with `MTL_FASTMETA_RX_MATCH_DIT` / `MTL_FASTMETA_RX_MATCH_K` |
 | `rtp` | `clock_rate` (ST 2022-6: 27000000) | `profile` 0 = `MTL_RTP_LINEAR`; `unit` = unit rate and scan, all zero = no unit rate (§13.6); `bitrate_bps` 0 = derived; `encoding` is the SDP rtpmap name; `"SMPTE2022-6"` adds the rules of §13.6; `troffset_us` as video's, with a unit rate (ST 2022-8 §6, §7.1, §8.1), else 0 |
 | `packet` | — | §13.2 |
 
@@ -629,15 +629,30 @@ unresolved.
   every 80 µs until `7cbe505d5`, SF-35); an AM824 SDP writes the Table 1 strings, `0.12` for
   `MTL_PTIME_125US` and `0.08`. `MTL_PCM8` (L8) sets `MTL_INFO_NON_COMPLIANT`: ST 2110-30 takes the
   AES67 formats L16 and L24 *(inferred: AES67 not read)*.
-- **Fastmeta.** A unit goes out as data items of at most 359 words (1436 B), one per RTP packet,
-  because a data item lies wholly inside one packet under the 1460 B Standard UDP Size Limit (ST
-  2110-41 §5.4; the 9-bit length would allow 511 words); `used` 0 sends one RTP packet with no data
-  item, the keep-alive (§5.1). TX frame units: `tx.underrun_policy` not SKIP (`OPTION_RANGE`;
-  the default `MTL_UNDERRUN_KEEPALIVE` sends that keep-alive, D-243). A session carries one `data_item_type` and `k_bit`: several item
-  types in one stream (§5.1) and Annex A segmentation are not offered (packet units carry them). The
-  payload type is dynamic, 96–127 (§5.2), and the marker is 0 on every packet. A unit of several
-  packets leaves within the §7 burst limit: at most CMAX = 4 packets back to back, then one per
-  TDRAIN, 1.25 ms below 727 packets/s.
+- **Fastmeta.** A TX unit is one data item, sent as one RTP packet: a data item lies wholly
+  inside one packet under the 1460 B Standard UDP Size Limit (ST 2110-41 §5.4; the 9-bit length
+  would allow 511 words), so TX `buffer_capacity_bytes` is at most `sc.max_udp_payload` − 16, 359
+  words (1436 B) at the default 1452, and 0 means that; more is `-MTL_EINVAL`, field
+  `fastmeta.buffer_capacity_bytes`, at create and at a `MTL_UPDATE_MEDIA` that lowers
+  `sc.max_udp_payload` (D-247). MTL writes the type, the K bit and the length and zero-pads the
+  content to 32 bits. One packet per unit keeps the §7 bucket at any unit rate; several packets
+  per unit could leave only four back to back, then one per 1.25 ms carried from unit to unit,
+  which spreads a 64 KiB unit over 52.5 ms, past its frame and the receiver's due time (D-247). So
+  several items per unit, several item types in one stream (§5.1) and Annex A segmentation are
+  carried by packet units. `used` 0 sends one RTP packet with no data item, the keep-alive (§5.1).
+  TX frame units: `tx.underrun_policy` not SKIP (`OPTION_RANGE`; the default
+  `MTL_UNDERRUN_KEEPALIVE` sends that keep-alive, D-243). A session carries one `data_item_type`
+  and `k_bit`. The payload type is dynamic, 96–127 (§5.2), and the marker is 0 on every packet. An
+  RX unit holds, in sequence order, the contents of the data items of one RTP timestamp (each as
+  long as its Data Item Length, padding included) that pass `MTL_FASTMETA_RX_MATCH_DIT` /
+  `MTL_FASTMETA_RX_MATCH_K`, which apply at dequeue; `used` 0 means none (a keep-alive, or every
+  item filtered out), and a packet whose items all fail counts once in
+  `rx.pkts_rejected{cause=fmd_filter}`. With no marker, a newer timestamp ends the unit; with two
+  legs a sequence gap from the previous unit's last packet waits for the gap at most
+  `rx.skew_budget_ns`, and the due time (§5.3) ends what is open. COMPLETE when no sequence number
+  from the previous unit's last packet to the newer timestamp's first is missing; a packet beyond
+  the unit's capacity is dropped and counted (`rx.pkts_rejected{cause=len}`) and the unit is
+  INCOMPLETE; a packet of a published unit's timestamp is dropped (`cause=stale`).
 
 **cvideo sizes.** What `codestream_bytes` bounds, by `cvideo.rate_mode` (the wire side of each
 mode is [timing.md](timing.md) §5.3):
@@ -675,8 +690,8 @@ muxer takes `frame_size` from its `bpp` option (`ecosystem/ffmpeg_plugin/mtl_st2
     1, ST 2110-20 §7.2). A named rate is `mtl_fps_rational(MTL_FPS_*)`.
   - Capability (`-MTL_ENOTSUP`, `NOT_IMPLEMENTED`): 1 to 120 frames per second for every scan.
     Video takes the rates of the legacy `enum st_fps` in MS1 (interlaced: the frame rates whose
-    field rate is one of them) and any rate in that range from MS2a; fastmeta any rate from
-    MS4a1, ANC from MS4a2; cvideo from MS4b, with JPEG XS only n/1 and n·1000/1001 (`-MTL_EINVAL`).
+    field rate is one of them) and any rate in that range from MS2a; ANC and fastmeta any rate
+    from MS4a2; cvideo from MS4b, with JPEG XS only n/1 and n·1000/1001 (`-MTL_EINVAL`).
 - `enum mtl_scan`: `MTL_PROGRESSIVE`, `MTL_INTERLACED` (the unit is a field), `MTL_PSF` (paced as interlaced, one index per frame).
 
 ### 3.5 RX format detection
@@ -869,8 +884,8 @@ What each essence gets in MS1–MS6 (yes, or the milestone), later, or not at al
 | underrun policy (`tx.underrun_policy`) default | SKIP | SKIP | SKIP; `MTL_UNDERRUN_SILENCE` as an option | `MTL_UNDERRUN_KEEPALIVE` (SKIP refused for frame units) | `MTL_UNDERRUN_KEEPALIVE` (SKIP refused for frame units) |
 | `MTL_UNDERRUN_REPEAT` (D-239) | MS4a1 | MS4b (JPEG XS) | — | — | — |
 | results, events, one stats schema | yes | yes (no stats today) | yes | yes | yes |
-| RX shape ([core.md](core.md) §2.2): frame units on core slots | yes | yes | yes | yes | yes (MS4a1; RTP only today) |
-| `RX_LATEST`, the due time, discard on frame units | MS2 | MS4b | MS4a1 | MS4a2 | MS4a1 |
+| RX shape ([core.md](core.md) §2.2): frame units on core slots | yes | yes | yes | yes | yes (MS4a2; RTP only today) |
+| `RX_LATEST`, the due time, discard on frame units | MS2 | MS4b | MS4a1 | MS4a2 | MS4a2 |
 | `MTL_SESSION_RX_BY_INDEX` (needs the RX `media_index`, §6.5) | MS2b | MS6 | MS6 | MS6 | MS6 |
 | start arrays (MS6) | yes | yes | yes | yes | yes (on the grid like ANC) |
 | pixel conversion (`app_format`) | yes | codec plugin | — | — | — |
@@ -1332,7 +1347,7 @@ One `struct mtl_unit` is what acquire and dequeue lend and what submit reads.
 | cvideo | a codestream per frame or field | bytes, literal | a frame, or a field |
 | audio | a run of samples: `unit_samples` per RX unit, the TX pool capacity per acquire | bytes, literal: a whole number of sample frames (channels × bytes per sample; else `-MTL_EINVAL`), so 0 is `-MTL_EINVAL`; samples = `used` / (channels × bytes per sample) | one sample: `media_index` is the unit's first sample |
 | ANC | the ANC packets of one frame or field (one per frame for PsF): plane 0 the packet table, plane 1 the words, RAW plane 2 the header words (§5.7) | table entries; 0 = no ANC packet: the empty RTP packet that keeps the stream alive | the frame or field of the video it follows |
-| fastmeta | one data item group | bytes, literal; 0 = one RTP packet with no data item, the keep-alive (§3.3) | as ANC, or its own rate with `MTL_FASTMETA_FREE_RUNNING` |
+| fastmeta | TX one data item; RX the data items of one RTP timestamp | bytes, literal; 0 = one RTP packet with no data item, the keep-alive (§3.3) | as ANC, or its own rate with `MTL_FASTMETA_FREE_RUNNING` |
 | generic RTP, any essence with `MTL_UNIT_PACKETS` | a chunk of packet slots | packets, literal | the essence's; the unit rate for generic RTP |
 
 ### 5.2 TX
@@ -3280,7 +3295,7 @@ sequence the library writes nothing inside the payload.
 | cvideo | the RFC 9134 header fields are the application's; CBR needs exactly `packets_per_unit` packets per unit (`MTL_SUBMIT_UNIT_END` with fewer is `-MTL_EINVAL`); `MTL_CVIDEO_VBR_MAX` allows fewer; a rate-limiter class is downgraded to software as today, and reported |
 | audio | the pacing unit is one packet; a chunk is consecutive packets, its media time the first sample of the first packet, each later packet first sample + the packet's samples; a chunk off the packet grid is a DISCONTINUITY (D-41); `MTL_SUBMIT_UNIT_END` is ignored |
 | ANC | packets go out in the ST 2110-40 window, after the pacing sync (fixes [engine.md](engine.md) §7.4 #4); bytes are in wire order in both directions, the library swaps nothing (fixes #5) |
-| fastmeta | data item type, K bit and length are the application's; the RX filters apply |
+| fastmeta | data item type, K bit and length are the application's; the RX filters apply to whole packets: a packet whose data items all fail is dropped (`rx.pkts_rejected{cause=fmd_filter}`), a packet with none (a keep-alive) is kept |
 | generic RTP | `rtp.clock_rate` required; `MTL_RTP_LINEAR` (type NL) or `MTL_RTP_GAPPED` (type N, RACTIVE 1080/1125), below; `packets_per_unit` required with UNIT pacing, no pacing unit with LAUNCH or ASAP; `rtp.encoding` reported for SDP; RX duplicates removed as in §13.7; RTP only, no raw UDP |
 
 **Generic RTP schedules.** `MTL_RTP_LINEAR` is the ST 2110-21 type NL read schedule over each

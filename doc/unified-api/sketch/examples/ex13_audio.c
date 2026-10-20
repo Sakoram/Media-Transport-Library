@@ -36,7 +36,7 @@ int rx_audio(mtl_session_h s, int32_t* pcm) {
 /* Host samples (a sound card's int32) to L24 in wire, then written: in media mode AUTO,
    MTL stamps each unit at the sample after the last. wire: room for samples x 3 bytes.
    Fast metadata (ST 2110-41: essence MTL_FASTMETA, fastmeta.data_item_type) takes the
-   same copy path, one data item group per write. */
+   same copy path, one data item per write. */
 int tx_audio(mtl_session_h s, const int32_t* pcm, uint32_t samples, uint8_t* wire) {
   mtl_s32_to_pcm24(wire, pcm, samples);
   int n = mtl_tx_write(s, wire, (size_t)samples * 3, NULL, MTL_FOREVER);

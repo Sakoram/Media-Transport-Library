@@ -27,7 +27,7 @@ behaviour without a test is not promised. Each entry gives, in this order:
 
 | Field | Meaning |
 |---|---|
-| ID | G-01…G-166 (§2), G-PKT-1…7 (§3); an entry with two IDs states both with one text |
+| ID | G-01…G-167 (§2), G-PKT-1…7 (§3); an entry with two IDs states both with one text |
 | Tier | B build, U unit (the core over the null backend and the test clock), UB unit at the engine boundary (the real engine and its packets, through the bindings, without a NIC), I integration on VFs, A acceptance, M measured with a capture (HW timestamps, EBU LIST); where each runs: [implementation-plan.md §8.1](implementation-plan.md#81-tiers-and-evidence) |
 | P or BE | **P**: promised (pass/fail); evidence exists or is funded in the named milestone, and a red P test blocks its milestone. **BE**: best effort until the named evidence exists; it never blocks an exit, and its entry says what evidence would make it P ([implementation-plan.md §8.1](implementation-plan.md#81-tiers-and-evidence)). An entry that names neither states none in its sources |
 | M | the milestone whose exit needs it |
@@ -43,7 +43,7 @@ budgets [§8.4](implementation-plan.md#84-performance-budgets), test isolation
 [§8.1](implementation-plan.md#81-tiers-and-evidence), the oracle
 [timing.md §16.2](timing.md#162-oracle-and-contract).
 
-## 2. Guarantees G-01…G-166
+## 2. Guarantees G-01…G-167
 
 - **G-01** U, UB, I; MS1. Every accepted TX submission has exactly one terminal outcome: a result
   when results are on, else a counter. Test: count outcomes against accepted submits over
@@ -275,10 +275,12 @@ budgets [§8.4](implementation-plan.md#84-performance-budgets), test isolation
   `mtl_tx_acquire_slot` leases exactly the named slot; `MTL_SESSION_RX_BY_INDEX` places unit k in
   slot k mod `pool_count` (for the other essences with their `media_index`, MS6). Test: named
   acquires over every slot; an RX index sweep.
-- **G-61** UB; P; MS4a (ST40 MS4a2, ST41 MS4a1). `MTL_UNDERRUN_KEEPALIVE`: ST40 keep-alive per
-  frame or field without ANC; ST41 at least every 500 ms. Test: no ANC submitted for 10 frames gives
-  one empty packet per frame, field or PsF segment, each inside its window (a PsF unit with ANC only
-  in one segment also gets an empty packet of its RTP in the other); ST41 at least every 500 ms.
+- **G-61** UB; P; MS4a2 (ANC in N4, fast metadata in N4f). `MTL_UNDERRUN_KEEPALIVE`: ST40
+  keep-alive per frame or field without ANC; fast metadata (ST 2110-41) at least every 500 ms. Test:
+  no ANC submitted for 10 frames gives one empty packet per frame, field or PsF segment, each inside
+  its window (a PsF unit with ANC only in one segment also gets an empty packet of its RTP in the
+  other); fast metadata: no unit for 2 s at 23.98, 59.94 and 120 fps gives a zero-item packet at
+  the first index 450 ms or more after the last packet, no gap above 500 ms.
 - **G-62** U, UB; P; MS6. A step keeps every media time and posts `TIME_STEP`; no session drops
   forever after a forward step when its producer re-syncs. Test: `MTL_FAULT_TIME_STEP` with
   `step_ns` = +37 s (today's UTC → PHC switch), or `MTL_FAULT_CLOCK_ADVANCE`; the published time
@@ -815,6 +817,19 @@ budgets [§8.4](implementation-plan.md#84-performance-budgets), test isolation
 - **G-166** U; MS4a1. A TX REPEAT session over an RX pool below n + 1 + `defer_step`, n the owner's
   units in reception at once, fails at create (`POOL_TOO_SMALL`) (D-241). Test: `null:1`,
   interlaced, owner pool 3, one leg.
+- **G-167** UB, U; P; MS4a2. Fast metadata (D-247). TX: a unit of `used` bytes leaves as one RTP
+  packet of one data item (the session's type and K bit, the length in words, zero padding, marker
+  0, UDP ≤ 1460 B at the default `sc.max_udp_payload`), `used` 0 as the 12-byte zero-item packet; a
+  `buffer_capacity_bytes` above `sc.max_udp_payload` − 16 is `-MTL_EINVAL`; the launches pass the
+  ST 2110-41 §7 checker. RX: the packets of one RTP timestamp land in one core slot in sequence
+  order, each ST 2022-7 copy once; a newer timestamp ends the unit, with two legs after a sequence
+  gap at most `rx.skew_budget_ns` later; at most two units in flight; a sender restart is followed
+  once the dedup admits it; COMPLETE exactly when no sequence number from the previous unit's last
+  packet to the newer timestamp's first is missing; `MTL_FASTMETA_RX_MATCH_DIT` / `_K` skip items
+  at dequeue. Test: `St40RxFmdSinkTest.*` (N3); `UnifiedFastmeta.Tx*` and
+  `St40TxFmdTaskletTest.MaxItemUnitIsOnePacketWithinNetworkCompatibilityModel`,
+  `.EmptyUnitIsTheKeepAlivePacket` (N4f); `UnifiedFastmetaRxUb.*` (N5f); the models
+  `design/models/fastmeta_rx.py` and `fastmeta_tx.py`.
 
 ## 3. Packet-unit guarantees G-PKT-1…7
 

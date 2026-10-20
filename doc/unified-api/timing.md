@@ -351,7 +351,7 @@ Every session runs on the SMPTE epoch. A unit index of any stream maps to an exa
 | video, cvideo interlaced | field | fields; even = first field | TFIELD = TFRAME/2 |
 | video PsF (`MTL_PSF`) | frame (two segments) | frames | TFRAME |
 | audio | the samples of a submission | its **first sample** | 1/Fs |
-| ANC, grid fastmeta | the ANC (or item group) for one video frame or field | the associated video index | the video's |
+| ANC, grid fastmeta | the ANC (or the fastmeta unit) for one video frame or field | the associated video index | the video's |
 | free-running fastmeta | one unit | own units | 1/`fastmeta.video.fps` |
 | generic RTP | unit of `rtp.unit` | units | 1/unit rate |
 
@@ -976,7 +976,7 @@ The grid (`struct st_core_grid`) per essence:
 | cvideo | as video | `TVD(N) − M` (VRX0 = 0, §5.3) | as video | as video | as video | 0 | as video | MS4b |
 | audio | the sample rate | `D_a` (§5.3) | §6.1's, plus one packet time (§8) | MS6 | 1 | channels × bytes per sample | — | MS4a1 |
 | ANC | the video's | the window target of §9.2, per parity | its builder's, measured in MS4a2 | MS6 | 1; 2 for fields | 0 | — | MS4a2 |
-| fastmeta | the video's, or its own rate when free running | `D_fmd` (§5.3) | its builder's, measured in MS4a1 | MS6 | as ANC | 0 | — | MS4a1 |
+| fastmeta | the video's, or its own rate when free running | `D_fmd` (§5.3) | its builder's, measured in MS4a2 | MS6 | as ANC | 0 | — | MS4a2 |
 | null (the test substrate) | the essence's | 0 | 0 | [0, 1 s] | the essence's | the essence's | the essence's | MS1 |
 
 - **Interlaced AUTO**: fields alternate in submission order, and a defer skips whole frames
@@ -1393,7 +1393,7 @@ Today ST 2110-41 is a mode of the ST40 session (`ST40_TX_FLAG_FAST_METADATA`) an
 (`include/st40_api.h:396-436`). R stays 90000; an item spec needing another RTP clock is a later
 extension (ST 2110-41 §5.3 lets the item spec define it).
 
-- `fastmeta.video` is the **associated video raster**: one data item group per video frame or field, `media_index` = the video index, RTP = the video RTP, on the grid like ANC. All zero takes the raster and launch delay of the first video session of its start; with no video in the start it is required (`-MTL_EINVAL`, `FIELD_REQUIRED`).
+- `fastmeta.video` is the **associated video raster**: one unit (TX: one data item, D-247) per video frame or field, `media_index` = the video index, RTP = the video RTP, on the grid like ANC. All zero takes the raster and launch delay of the first video session of its start; with no video in the start it is required (`-MTL_EINVAL`, `FIELD_REQUIRED`).
 - `MTL_FASTMETA_FREE_RUNNING`: `video.fps` is the stream's own unit rate (required). The stream is off the video grid (excluded from G), `M(k) = T0 + k/rate` on the epoch; in TAI mode each unit's time is taken as given (no snap); RTP = `floor(M × 90000)`.
 - Field parity follows the index (`video.scan`); there is no `second_field` input. Launch `M + fastmeta.target_delay_ns` (§5.3); keep-alive by the underrun policy (§6.4); marker 0 on every packet (this edition; MTL sets 0, `st_tx_ancillary_session.c:252`, copied at `:568`).
 
@@ -1957,7 +1957,7 @@ The milestone that carries each rule: [implementation-plan.md](implementation-pl
 
 The text, method, tier and P/BE of every guarantee are in [guarantees.md](guarantees.md): how to
 read an entry in [§1](guarantees.md#1-how-to-read-this-file), the entries in ID order in
-[§2](guarantees.md#2-guarantees-g-01g-166); [implementation-plan.md](implementation-plan.md) §8.2
+[§2](guarantees.md#2-guarantees-g-01g-167); [implementation-plan.md](implementation-plan.md) §8.2
 indexes them by milestone. The timing guarantees, with the section that states each rule:
 
 | ID | Tier | Rule in |

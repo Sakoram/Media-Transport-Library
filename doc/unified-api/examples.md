@@ -1816,7 +1816,7 @@ int rx_audio(mtl_session_h s, int32_t* pcm) {
 /* Host samples (a sound card's int32) to L24 in wire, then written: in media mode AUTO,
    MTL stamps each unit at the sample after the last. wire: room for samples x 3 bytes.
    Fast metadata (ST 2110-41: essence MTL_FASTMETA, fastmeta.data_item_type) takes the
-   same copy path, one data item group per write. */
+   same copy path, one data item per write. */
 int tx_audio(mtl_session_h s, const int32_t* pcm, uint32_t samples, uint8_t* wire) {
   mtl_s32_to_pcm24(wire, pcm, samples);
   int n = mtl_tx_write(s, wire, (size_t)samples * 3, NULL, MTL_FOREVER);
@@ -1863,7 +1863,7 @@ and the first sample's capture instant, and MTL absorbs up to a packet of jitter
 picture finds the sample at which a video frame starts with `mtl_rx_align` (`mtl_sync.h`), from
 the two media indices and the exact rates, never from floored times
 ([timing.md §11.6](timing.md#116-av-alignment-on-receive)). Fast metadata (ST 2110-41, essence
-`MTL_FASTMETA` and `fastmeta.data_item_type`) takes the same copy path: one data item group per write, `used`
+`MTL_FASTMETA` and `fastmeta.data_item_type`) takes the same copy path: one data item per write, `used`
 0 the keep-alive, and like ANC it follows the video of its start.
 
 ## 16. ANC both ways
@@ -2677,7 +2677,7 @@ What to notice:
   (`MTL_INSTANCE_SHARED`): the first open creates it, a later one joins it and names a subset of
   its ports or none; a different setting is `-MTL_EEXIST` (`INSTANCE_MISMATCH`). `mtl_port_parse`
   reads a property in the `MTL_PORTS` grammar. `mtl_library_version_num` against
-  `MTL_API_VERSION` catches an older library at run time.
+  `MTL_API_VERSION` catches an older library at runtime.
 - **Caps.** `mtl_format_parse` maps a GStreamer, FFmpeg or SDP format name to an application or a
   transport format, and `mtl_format_describe` gives the frame size the framework's buffers must
   have. An application format makes MTL convert in the caller. `caps_formats` lists the caps

@@ -176,7 +176,7 @@ of every task and the standing instructions are in [ms1-status.md](ms1-status.md
 | D-01…D-244 | design decisions and their reason | [decisions.md](decisions.md) §2 |
 | DF-01…DF-29 | the defaults for the ST20 port | [decisions.md](decisions.md) §4 |
 | OI-n | open implementation issues, each with its rule and milestone | [decisions.md](decisions.md) §5 |
-| G-01…G-166, G-PKT-1…7 | guarantees, each with its test | [guarantees.md](guarantees.md) |
+| G-01…G-167, G-PKT-1…7 | guarantees, each with its test | [guarantees.md](guarantees.md) |
 | R-xxx-n, R-PKT-n, K-REQ-n, N-REQ-n, I-REQ-n | requirements | [requirements.md](requirements.md) |
 | GO-n, NG-n, P1–P9 | goals, non-goals, personas | [requirements.md](requirements.md) §2 |
 | E1–E17 (E5 split into E5a, E5b), R1, R2, MF1–MF10, EK1–EK21, PE1–PE9 | engine changes | [engine.md](engine.md) §6 |
