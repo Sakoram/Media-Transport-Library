@@ -38,20 +38,20 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | Instance, lifecycle and commands | D-08, D-36, D-44, D-48, D-58, D-60, D-62, D-121, D-186, D-192, D-193, D-210, D-211, D-236–D-238 | OI-2, OI-11, OI-49, OI-61, OI-62 | contract.md, core.md |
 | Data path and results | D-01, D-02, D-03, D-14, D-42, D-50, D-75, D-77, D-88, D-119, D-120, D-183, D-203, D-207–D-209, D-213 | — | contract.md, core.md |
 | Memory, buffers and conversion | D-16, D-17, D-54, D-55, D-56, D-76, D-86, D-100, D-151, D-202, D-214 | OI-41, OI-59, OI-60 | contract.md |
-| The core and its bindings | D-06, D-07, D-99, D-103, D-111, D-118, D-124, D-126, D-127, D-171, D-172, D-174, D-176, D-177, D-179, D-180, D-182, D-226 | — | core.md |
+| The core and its bindings | D-06, D-07, D-99, D-103, D-111, D-118, D-124, D-126, D-127, D-171, D-172, D-174, D-176, D-177, D-179, D-180, D-182, D-226, D-250, D-251 | — | core.md |
 | Waiting and queues | D-04, D-30, D-43, D-68, D-79, D-102, D-122, D-141, D-142, D-158–D-170, D-181, D-206 | OI-63, OI-66, OI-80 | core.md, contract.md |
 | Time sources and media time | D-09, D-10, D-11, D-15, D-31, D-38, D-41, D-51, D-85, D-132, D-144, D-205, D-215, D-216, D-221, D-229–D-233, D-235 | OI-7, OI-44, OI-68, OI-72 | timing.md |
 | Launch, late and underrun policy | D-13, D-39, D-52, D-53, D-78, D-130, D-131, D-173, D-212, D-218–D-220, D-234, D-239, D-241, D-243 | — | timing.md |
 | RX | D-37, D-150, D-152, D-155, D-156, D-199, D-204, D-225, D-227, D-228, D-242 | OI-25, OI-26, OI-67, OI-73, OI-74, OI-84 | contract.md |
 | Formats and sender types | D-32, D-101, D-143, D-222 | OI-42, OI-71, OI-76, OI-77 | contract.md, timing.md |
 | ANC and fast metadata | D-67, D-70, D-145–D-149, D-157, D-201 | OI-45, OI-78 | contract.md, timing.md |
-| Packets, RTP and legs | D-26, D-59, D-82, D-115, D-133, D-134, D-198, D-224 | OI-56 | contract.md, timing.md |
+| Packets, RTP and legs | D-26, D-59, D-82, D-115, D-133, D-134, D-198, D-224, D-249 | OI-56 | contract.md, timing.md |
 | Options, stats, errors and logs | D-19, D-21, D-73, D-80, D-81, D-84, D-128, D-129, D-139, D-153, D-154, D-175, D-244 | OI-40, OI-50, OI-54, OI-65, OI-69 | contract.md, engine.md |
 | Headers and structs | D-05, D-33, D-34, D-45, D-71, D-72, D-74, D-97, D-104, D-105, D-137, D-140, D-185, D-187, D-195, D-217, D-223 | OI-70 | the headers, contract.md, README.md |
 | Versioning and export | D-23, D-83, D-106, D-108, D-190, D-191, D-194 | OI-64 | migration.md |
 | Legacy APIs and engines | D-18, D-24, D-27, D-57, D-112, D-114, D-123, D-125, D-178, D-189, D-197, D-240, D-246, D-248 | OI-3, OI-81 | migration.md, engine.md |
-| Validation and process | D-64, D-66, D-87, D-98, D-107, D-109, D-110, D-113, D-135, D-136, D-138, D-184, D-188, D-200, D-245 | — | implementation-plan.md, autonomous-run.md |
-| Deployment and pods | D-49, D-63, D-69, D-89, D-90, D-91, D-92, D-116, D-117 | OI-23, OI-43, OI-75 | deployment.md |
+| Validation and process | D-64, D-66, D-87, D-98, D-107, D-109, D-110, D-113, D-135, D-136, D-138, D-184, D-188, D-200, D-245, D-253 | — | implementation-plan.md, autonomous-run.md |
+| Deployment and pods | D-49, D-63, D-69, D-89, D-90, D-91, D-92, D-116, D-117, D-252 | OI-23, OI-43, OI-75 | deployment.md |
 | NMOS, SDP and IPMX | D-93, D-94, D-95, D-96, D-196 | — | nmos-ipmx.md |
 
 ## 2. Decisions
@@ -293,6 +293,11 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | D-245 | The autonomous run (2026-10-16): agents implement MS1–MS7 with no maintainer available. Its process rules replace the maintainer's approvals, checkpoints and stop-and-ask for the run. Questions and plan bugs are decided by competing designers and a judge, and recorded as D-rows to confirm. Each commit is pushed to the fork branch `unified-api-impl`. Amends D-135 | autonomous-run.md |
 | D-246 | The legacy `BLOCK_GET` get (st20p MS2b; st22p, st30p, st40p MS4) is DP, then WT with the session's legacy wake mode; `wake_block` is LW1: a store to `lkick` on the in-flight line, then EVENT on lane 0. (continued below the table) | wait-protocol.md §3, migration.md §6.5 |
 | D-248 | E1a and REPEAT on main's `tv_frame_free_cb` (`8c9d48f3e`): E1a is MF1's claim (SF-39), MF7 and the recovery verdict with one `sh_info` per frame; the binding names a unit from its own record of the frame; the two alternating `sh_info` come with T-REP. (continued below the table) | engine.md §2.2, §5 |
+| D-249 | Kernel-socket TX on a FLOWS update: since `8224aba52` each packet goes to its header's destination, so G1a's template swap redirects it; the MS5 TX queue swap stays for `dscp` and `ttl`, which that backend holds as socket options, and for the old unit's packets still queued for the socket threads. (continued below the table) | engine.md §1.7, §2.17; core.md §5.4 |
+| D-250 | Under `ST_RX_VIDEO_NT_STORE`, an RX video or cvideo session without a packet lcore runs `_mm_sfence()` on its RX tasklet before any store that hands a unit or its buffer to another context outside `rv_frame_notify`, `rv_st22_frame_notify` and `rv_slice_notify`, (continued below the table) | engine.md §2.5; core.md §4.2; contract.md §9.12 |
+| D-251 | The core and its bindings never busy-wait on a tasklet for DMA: E8's force-complete, the stop, discard and detach acknowledgements and a FLOWS switch wait across `tick` visits for `rv_dma_dequeue` to empty the engine, and never call `rv_dma_flush`. (continued below the table) | engine.md §1.1, §2.5; contract.md §9.12 |
+| D-252 | EK5's single-instance lock is taken before the start-up unlink and released only after the exit-time unlink, so neither a manager's start nor its exit unlinks another manager's socket; a second manager exits non-zero. (continued below the table) | deployment.md §1.6, §4.12; engine.md §6 |
+| D-253 | This host's DPDK `26.03.91_mtl_` is below `versions.env`'s 26.07.91, so `libmtl` builds without the TSC-init queue-rate clear (`41d9f31a5`) and a VF keeps the rates of an RL process that ended without `mtl_uninit`. (continued below the table) | autonomous-run.md §8; engine.md §6 |
 
 Rows too long for the table, continued:
 
@@ -530,6 +535,31 @@ Rows too long for the table, continued:
   (core.md §1); legacy SF-39 left to R2, which never reaches a raw `st20_tx` session; a use record
   without address and IOVA. Amends D-123 and D-240. Taken in the autonomous run (2026-10-20,
   D-245); to confirm by the maintainer
+- **D-249**, continued: A unified binding's kernel-socket TX queue sets `IP_TOS`, `IP_TTL` and, for
+  a multicast destination, `IP_MULTICAST_TTL` on each of its sockets; legacy queues keep today's
+  socket defaults (multicast TTL 1, SF-92; D-24). MS5's RTCP update also re-keys both NACK flows
+  (SF-37). A running kernel-socket leg stays `-MTL_ENOTSUP` until MS5. Taken in the autonomous run
+  (2026-10-20, D-245); to confirm by the maintainer
+- **D-250**, continued: which fence already: a force-complete at the due time or at DRAIN, an
+  `st_engine_core.h` accessor that publishes, the acknowledgement of a hand-back that returns the
+  destination of a unit in assembly. A release store does not order streaming stores, and a fence on
+  another thread does not order the tasklet's; a hand-back the CP makes on a detached session
+  relies, as legacy's migration does, on the locked unlock of the tasklet's last visit. Taken in the
+  autonomous run (2026-10-20, D-245); to confirm by the maintainer
+- **D-251**, continued: That bounded poll (`f64db786a`, once per newer RTP timestamp, SF-93) stays
+  legacy's one deliberate spin, which core sessions with `MTL_OPT_DMA` inherit at a new frame; no
+  §8.4 load runs RX DMA, so no budget changes. Taken in the autonomous run (2026-10-20, D-245); to
+  confirm by the maintainer
+- **D-252**, continued: The socket is `0660` with a group only when the operator names one (the
+  DaemonSet does), else main's `0666` (`04138ad2c`, pinned by the smoke test
+  `test_manager_runtime_files.py`), so legacy clients of any user keep connecting. Amends
+  deployment.md §1.6's backport. Taken in the autonomous run (2026-10-20, D-245); to confirm by the
+  maintainer
+- **D-253**, continued: In the run a TSC case red after an RL process on the same VFs since their
+  creation is re-run on re-created VFs and counts only if red again, and a TSC measurement runs on
+  re-created VFs after an unclean RL exit; L0 first proves that a re-create lifts a kept rate, else
+  the host moves to `versions.env`'s DPDK before L0. EK16 keeps its scope; its queue-rate part is
+  main's code. Taken in the autonomous run (2026-10-20, D-245); to confirm by the maintainer
 
 ## 3. Why: prior art
 

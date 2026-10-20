@@ -163,8 +163,10 @@ filters, and hands out XSK map descriptors. At `a6fc9093` **[verified]** unless 
   **[inferred]**).
 
 The library survives manager loss (§4.12). The manager needs, whatever the API: mode `0660` with a
-group (for example `mtl`), `SO_PEERCRED` identity, grants owned per client, SIGPIPE ignored (EK5,
-[engine.md](engine.md)), backported to the legacy API.
+group (for example `mtl`) when the operator names one, else main's `0666` (`04138ad2c`), which a
+smoke test pins for clients of any user (D-252); `SO_PEERCRED` identity, grants owned per client,
+SIGPIPE ignored and a single-instance lock (EK5, [engine.md](engine.md)), backported to the legacy
+API.
 
 ## 2. Processes and instances
 
@@ -674,17 +676,19 @@ for AF_XDP on shared host netdevs and for bare-metal hosts. As a DaemonSet with 
 into pods, it must be (EK5):
 
 - **identity from the kernel**: `SO_PEERCRED` (or `SO_PEERPIDFD`), never a self-reported PID; socket
-  mode `0660` with a group. The kernel translates a peer's PID into the reader's namespace (0 when not
-  visible) and its UID into the reader's user namespace, so checks rest on UID/GID or a per-pod socket,
-  never on the PID **[inferred]**;
+  mode `0660` with the group the DaemonSet names (EK5's option, D-252). The kernel translates a
+  peer's PID into the reader's namespace (0 when not visible) and its UID into the reader's user
+  namespace, so checks rest on UID/GID or a per-pod socket, never on the PID **[inferred]**;
 - **netns independent**: ports named by PCI address or host ifname, never by the client's ifindex,
   which names another interface in the manager's namespace;
 - **connection scoped**: every grant (CPUs, queues, flows, UDP filters) is released when the
   connection closes, and filters are tracked per client; a queue's `tx_maxrate` is reset when the
   queue is granted again (§4.13);
 - **restartable**: clients re-register what they hold after a manager restart and the manager
-  reconciles; it deletes only rules in its own range, takes a single-instance lock before unlinking the
-  socket, handles SIGTERM and ignores SIGPIPE.
+  reconciles; it deletes only rules in its own range, takes a single-instance lock before unlinking
+  the socket and releases it only after its exit-time unlink, so neither its start nor its exit
+  unlinks another manager's socket (D-252), handles SIGTERM (on main, `b10015803`) and ignores
+  SIGPIPE.
 
 The library uses `MSG_NOSIGNAL` and a per-request timeout (EK4; main has the `MSG_NOSIGNAL` part,
 `d65ecb135`). On manager loss it posts `MTL_EVENT_MANAGER_LOST`, sets health `MANAGER_LOST` and

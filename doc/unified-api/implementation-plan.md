@@ -1695,10 +1695,14 @@ reference body of both functions is the inline code they replaced:
 (checked by `check.sh` at that commit), plus decode's two new argument checks (a `word_mode`
 above `MTL_ANC_WORDS_RAW`, or RAW without `raw_hdr`: `-MTL_EINVAL`, `info` zeroed). N5's fuzz
 harness decodes arbitrary bytes, then encodes every decoded entry and decodes it again, which must
-give the same table, under ASan; the `UnifiedUnitTest` replay of its corpus runs in CI while the
-libFuzzer build is off. N5's commit also adds the target `anc_rfc8331_fuzz` to the list in
-`doc/fuzzing.md` ("the exported RFC 8331 decode and encode of the unified API, a pure function: no
-EAL").
+give the same table, under ASan; the `UnifiedUnitTest` replay of its committed seed corpus runs in
+every unit run and is N5's gate. N5's commit also registers `anc_rfc8331_fuzz` in `fuzz_targets` of
+`tests/fuzz/meson.build`, which puts it in the Fuzz Tests job (`fuzz_tests.yml`, through
+`.github/scripts/ci/fuzz.sh`) and in `tests/acceptance/fuzzing/test_fuzzing.py`. The harness's file
+comment says what it fuzzes ("the exported RFC 8331 decode and encode of the unified API, a pure
+function: no EAL"), and N5 adds it to the first paragraph of `tests/doc/fuzz/index.rst` and updates
+that page's harness count. Its libFuzzer run (`fuzz.sh build`, `FUZZ_TIME=60 fuzz.sh run`) needs a
+clang that builds `lib/`, not clang 18 (T-115).
 
 **MS4b**: cvideo (st22p re-based; its ledger rows first; ST 2110-22 codec plugins on the transform state, the
 `video.*` keys apply; E10: ST22 CBR and the synchronous oversize check), cvideo REPEAT (JPEG XS,

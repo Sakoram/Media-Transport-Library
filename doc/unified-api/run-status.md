@@ -67,6 +67,11 @@ confirm. One row each; the D-row holds the decision itself.
 | 2026-10-20, continued | | | | `/home/labrat/wip/unified-api-impl/r0/design/wake/verdict.md`; model `design/models/legacy_wake.py` (`/home/labrat/wip/unified-api-impl/r0/design/wake/judge/legacy_wake.out`, `judge/break_wk_a.out`); `UnitTest --gtest_filter='*St20PipelineRxBlocking*:*St20PipelineTxBlocking*:*PipelineTxWakeBlock*'`: 30 passed |
 | 2026-10-20 | R0 | E1a and REPEAT on main's `tv_frame_free_cb` (`8c9d48f3e`): E1a's scope, the binding's naming, SF-39's and SF-18's owners, the PR #1770 conditions | D-248 | |
 | 2026-10-20, continued | | | | `/home/labrat/wip/unified-api-impl/r0/design/e1a/verdict.md` (with problem.md, e1-a.md, e1-b.md, e1-c.md, judge/); model `design/models/tx_completion.py` (`judge/tx_completion.out`); `UnitTest --gtest_filter='*St20TxExtFrameDoneTest*:*St20TxTaskletPending*'`: 17 passed |
+| 2026-10-20 | R0, question SMALL (DQ3) | the kernel-socket TX queue swap after `8224aba52`: TOS, TTL and the source port come from the socket, multicast leaves with TTL 1, the NACK flows go stale | D-249 | `r0/design/small/verdict.md`; `sm-c-dq3_socket.py`, `sm-b/kernel_socket_mcast_ttl.py`; `MtDpSocketTxTest.GsoPacketsGoToTheirHeaderDestination` |
+| 2026-10-20 | R0, question SMALL (DQ4) | non-temporal RX stores (`1147e8b30`) and a publication or hand-back outside the three fenced notifies | D-250 | `r0/design/small/verdict.md`; `sm-a/check_rx_fence.py`, `sm-c-dq4_fence_check.py`, `sm-b/nt_publish_model.py` |
+| 2026-10-20 | R0, question SMALL (DQ5) | the bounded DMA busy-poll on the RX tasklet (`f64db786a`), per newer RTP timestamp | D-251 | `r0/design/small/verdict.md`; `sm-c-dq5_flush_model.py`; `St20RxDmaTest.*`, `St20RxDmaRedundantTest.*` |
+| 2026-10-20 | R0, question SMALL (DQ6) | EK4/EK5 partly on main; the exit unlink orphans a second manager, every pytest session orphans the run's; main pins `0666` | D-252 | `r0/design/small/verdict.md`; `sm-a/manager_lock_model.py`, `sm-c-dq6_manager_model.py`; `MtInstanceManagerGoneTest.*` |
+| 2026-10-20 | R0, question SMALL (DQ7) | the TSC-init queue-rate clear is compiled out on this host's DPDK 26.03.91 | D-253 | `r0/design/small/verdict.md`; `sm-c-dq7_check.py`; `MtDevRlTeardownTest.*` |
 
 ## 4. Blocked outside the run
 
@@ -76,6 +81,9 @@ run prepared for each.
 | Item | Needed by | Prepared | What the maintainer must do |
 |---|---|---|---|
 | R0: the guard denied a Bash call ("never print environment variables"), a Python heredoc that tagged `final_model.py`'s flake8 findings with `noqa`, to add D-246's labels LW1, LW2 | M0 | `final_model.py` unchanged; design/wait-tests.md §1 gives the labels to M0; `/home/labrat/wip/unified-api-impl/denied/r0-final-model-noqa.md` | review the guard's pattern |
+| The Fuzz Tests job (`fuzz_tests.yml`): a clang + ASan build of `libmtl` and the harnesses, each target fuzzed, on every pull request that changes `lib/`, `include/` or `tests/fuzz/` | the pull requests of the run's milestones | | |
+| The Fuzz Tests job, continued | | this host has clang 18 only, which cannot build `lib/` (T-115), and the branch runs no CI; the run's evidence is the unit tier's corpus replays. If a clang that builds `lib/` is installed under `~/.local` (autonomous-run.md §3), N5 quotes its local run and this row records it | |
+| The Fuzz Tests job, continued | | | run the job on each pull request; check that MS3's `local: *` kept the harnesses' coverage (abi.md §6, stage A) |
 
 ## 5. Final report
 

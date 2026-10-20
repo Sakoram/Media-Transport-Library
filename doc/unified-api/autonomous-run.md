@@ -301,9 +301,12 @@ The state when the run was prepared (2026-10-16):
 | E830 | Intel E830-CC, PFs `0000:15:00.0` (VFs `0000:15:01.0`–`.5`) and `0000:15:00.1` (VFs `0000:15:11.0`–`.5`), NUMA node 0, PTP clock `/dev/ptp0`. Milestone exits run on it as well. `run_gtest` picks it unless given `p_port` and `r_port` (and a `timeout_seconds` above the suite's length). `gtest.sh` picks it unless `MTL_GTEST_PF` names another PF (see **Nightlies**) |
 | CPUs | 256 threads; node 0 is CPUs 0–63 and 128–191, node 1 is 64–127 and 192–255. Governor `performance`. No boot-time isolation (`isolcpus`, `nohz_full`); THP `madvise` |
 | Memory | 2 MB hugepages, 1024 on each NUMA node; no 1 GB pages |
+| DPDK | `26.03.91_mtl_` (`pkg-config --modversion libdpdk`); `versions.env` pins 26.07 at MTL patch level 91. |
+| DPDK, continued | Below 26.07.91 `libmtl` builds without the TSC-init queue-rate clear (`41d9f31a5`; the installed `libmtl.so` lacks its log strings), so a VF keeps the queue rates of an RL process that ended without `mtl_uninit` (a timeout kill, a crash, SIGKILL; KahawaiTest has no SIGTERM handler) and a later TSC run on it is capped near half rate: see **Queue rates** below |
 | Root | `sudo` works without a password |
 | Baseline | `./build.sh` green, `./build.sh unit` 959 passed and 1 skipped, KahawaiTest `St20p*` 44 of 44 on each NIC, all at `770294a1` (the library is unchanged since; P0's configuration changed only `.github/`, the agents and the tests' `CLAUDE.md` files) |
-| MtlManager | this tree's, started by `mtl-system-admin` `manager_start`. Never touch another clone or worktree (`/home/labrat/Media-Transport-Library`, `/home/labrat/mtl-3`, `/home/labrat/mtl-2-pr1796`, `/tmp/*`) |
+| MtlManager | this tree's, started by `mtl-system-admin` `manager_start`. Never touch another clone or worktree (`/home/labrat/Media-Transport-Library`, `/home/labrat/mtl-3`, `/home/labrat/mtl-2-pr1796`, `/tmp/*`). Stop it (`manager_stop`) before each pytest session; after the session run `manager_stop`, then `manager_start`. |
+| MtlManager, continued | The session fixture starts its own MtlManager (`tests/acceptance/conftest.py`, `mtl_manager`), whose start unlinks this one's socket (`manager/mtl_manager.cpp:101`) and whose exit leaves none (`:241`), while `manager_start` still sees the old process and does nothing; and the smoke test `test_manager_runtime_files.py` fails while another MtlManager runs (D-252) |
 | Acceptance | `/mnt/media` mounted (NFS, read-only); `tests/acceptance/venv`; the `.local_install` tree |
 | GitHub | the fork's workflows run on pushes to `main` and `maint-**` only, so pushes of `unified-api-impl` start no CI |
 | Disk | `/` 55 % full (213 GB free). Remove only build trees of worktrees the run created, and keep at least 20 GB free |
@@ -314,6 +317,21 @@ in [run-status.md](run-status.md) §1: THP `never`, turbo off, C1 only (`cpupowe
 cgroup v2 isolated cpuset partition for the node-1 cores of the measured sessions; they are
 restored after the measurement, and that is recorded too. Boot-time isolation is a host deviation
 recorded in [run-status.md](run-status.md) §1, unless the maintainer set it before the start.
+
+**Queue rates** (D-253). A TSC case red after any RL process on the same VFs since they were created
+is re-run after `nic_create_vf` (the PF's `bdf`, `vf_count` 6) re-creates that PF's VFs while
+nothing uses them; it counts only if it is red again, and the milestone ledger lists each such
+re-run. A TSC measurement (S0, S1) runs on re-created VFs whenever an RL process on them ended
+without `mtl_uninit` since their creation. L0 first checks that a re-create lifts a kept rate, on
+the E830 pair: `sudo timeout -s KILL 15 build/tests/KahawaiTest --p_port 0000:15:01.0 --r_port
+0000:15:01.1 --auto_start_stop --pacing_way auto
+--gtest_filter=St20p.rx_ext_digest_1080p_no_convert_s2` (killed while it runs, else its clean exit
+resets the rates), then the same case with `--pacing_way tsc` (expected red near half rate; if not
+capped, repeat with an earlier kill), `nic_create_vf` on `0000:15:00.0`, and the TSC run again
+(expected green). The result goes to [run-status.md](run-status.md) §1. If the re-create does not
+lift the rate, the lead moves the host to `versions.env`'s DPDK (`mtl-system-admin` `dpdk_build`,
+then `build-both.sh` and a MtlManager restart) before L0 and records it in
+[run-status.md](run-status.md) §1. Neither step reboots or reloads a driver.
 
 **Two install trees, one build.** Each runner loads a different tree. `build/tests/KahawaiTest`,
 which `run_gtest` runs, loads `libmtl` from `/usr/local` (its RUNPATH). `gtest.sh` and pytest run

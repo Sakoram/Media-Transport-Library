@@ -819,7 +819,8 @@ The completing context:
    stores PUBLISHED\|gen, or HELD\|gen when the pin bit is set or repeat uses remain, with
    W in either when the test says so (release); the store is a CAS when the slot can carry holds.
    A later move from HELD to PUBLISHED keeps W. With results off it stores FREE, never W. An RX
-   completer stores PUBLISHED\|gen (release).
+   completer stores PUBLISHED\|gen (release), for RX video after the engine's fence of its streaming
+   stores ([engine.md](engine.md) §2.5, D-250).
 4. **E2**: one `fetch_add` on the object's event word (acq_rel), which returns its counts and
    attachment bits (wait-protocol.md §2); no fence. With RESULTS | ACQUIRE, it runs after every store of step 3,
    W or not, and after every later store that moves a TX slot word out of HELD to PUBLISHED, or
@@ -1243,7 +1244,7 @@ sequenceDiagram
     participant TK as TK
     APP->>APP: build new header templates<br/>for every changed leg, off to the side
     APP->>WK: the blocking work
-    WK->>WK: ARP resolve (MS3-MS4: in the CP call),<br/>flow create, IGMP join, and from MS5<br/>RTCP header update, socket-backend<br/>queue re-create (all or nothing across legs)
+    WK->>WK: ARP resolve (MS3-MS4: in the CP call),<br/>flow create, IGMP join, and from MS5<br/>RTCP header and NACK flow update,<br/>socket-backend queue re-create<br/>(all or nothing across legs)
     WK->>TK: command: publish {templates, gen, activation}
     TK-->>APP: receipt ack (PENDING)
     TK->>TK: at the first unit boundary >= activation:<br/>swap every changed leg at once
@@ -1254,10 +1255,15 @@ sequenceDiagram
 
 - Packets already in rings and descriptors carry the old header, so the ack reports the first
   media index sent to the new destination (this matches IS-05 scheduled activation).
-- (MS5) The kernel-socket backend sent GSO to `t->send_addr`, fixed at queue creation (SF-36);
-  since `8224aba52` it sends each packet to its header's destination (`datapath/mt_dp_socket.c:75`,
-  `:124-127`, `:152`). A worker creates a new queue and it is swapped at the boundary. The RTCP TX header copied from `s_hdr` at init (`st_tx_video_session.c:1040-1042`)
-  is updated too (SF-37).
+- (MS5) The kernel-socket backend sent GSO to `t->send_addr`, fixed at queue creation (SF-36); since
+  `8224aba52` it sends each packet to its header's destination (`datapath/mt_dp_socket.c:75`,
+  `:124-127`, `:152`), so a change of `ip` or `udp_port` needs only the template swap. Its `dscp`
+  and `ttl` are socket options ([engine.md](engine.md) §1.7), and the socket threads send the old
+  unit's queued packets later, so for a change of either, and for every RX change, a worker creates
+  a new queue with the new options and it is swapped at the boundary (D-249). The RTCP TX header
+  copied from `s_hdr` at init (`st_tx_video_session.c:1040-1042`) is updated too, and so are both
+  NACK flows: the TX session's NACK queue at `udp_port` + 1 (`:1055-1059`) and the RX session's NACK
+  header (`st_rx_video_session.c:3271-3272`) (SF-37).
 - RX: the new flow rule joins the same queue before the old one is removed. With `MTL_AT_TAI t`
   the old rules accept only units whose media time is before t and the new ones only units at or
   after t; a worker removes the old rules and leaves the old groups after the first unit at or

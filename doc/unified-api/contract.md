@@ -571,7 +571,7 @@ still owns its name, so that create is `-MTL_EEXIST` until the old session is RE
 | `source_filter` | RX source-specific multicast; all zero = none; with unicast RX it checks the sender |
 | `udp_port` | required; a leg with `udp_port` 0 does not exist (a reserved leg is Phase 7, §14.1) |
 | `udp_src_port` | TX: `udp_port`; RX: any |
-| `dscp` | TX: into the IP TOS; 0 = CS0. Implemented with the bindings: video in MS1, the other essences in MS4. On the kernel-socket backend, where MTL writes no IP header, it is set with `setsockopt(IP_TOS)`. The IPMX profile's defaults (AF41 audio, AF42 others) and `MTL_FLOWF_DSCP_LITERAL` are Phase 7 |
+| `dscp` | TX: into the IP TOS; 0 = CS0. Implemented with the bindings: video in MS1, the other essences in MS4. On the kernel-socket backend, where MTL writes no IP header, it is set with `setsockopt(IP_TOS)`, and `ttl` with `IP_TTL` and, for a multicast destination, `IP_MULTICAST_TTL` (D-249). The IPMX profile's defaults (AF41 audio, AF42 others) and `MTL_FLOWF_DSCP_LITERAL` are Phase 7 |
 | `ttl` | 64 |
 | `dst_mac` | used only with `MTL_FLOWF_USER_MAC` (no ARP) |
 | `vlan` | reserved, 0 |
@@ -2635,11 +2635,13 @@ GPU pinned host memory imports as host memory today.
        assembly it discards.
      - Discard, detach and close also return those of the ready units they drop
        (`rx.units_flushed`).
-   - It runs on the tasklet at the command's acknowledgement (MS2a `tick`) when the session is
-     on a scheduler, after the engine's DMA for the unit in assembly has drained. That drain is
-     new code in the RX binding; today's `rv_slot_by_tmstamp` flushes the DMA in flight for a
-     bounded time (`rv_dma_flush`, `:1571-1591`, since `f64db786a`) and refuses a new frame only
-     when that flush fails, `:1229-1235`. In CREATED and STOPPED it runs on the calling thread.
+   - It runs on the tasklet at the command's acknowledgement (MS2a `tick`) when the session is on a
+     scheduler, after the engine's DMA for the unit in assembly has drained and the tasklet has
+     fenced its streaming stores ([engine.md](engine.md) §2.5, D-250). That drain is new code in the
+     RX binding, checked at each `tick` visit and never by a busy-poll (D-251); today's
+     `rv_slot_by_tmstamp` flushes the DMA in flight for a bounded time (`rv_dma_flush`,
+     `:1571-1591`, since `f64db786a`) and refuses a new frame only when that flush fails,
+     `:1229-1235`. In CREATED and STOPPED it runs on the calling thread.
    - **Generations.**
      - A generation is 31-bit, from 1, wrapping 2^31 − 1 → 1. g is older than G when
        (G − g) mod (2^31 − 1) lies in [1, 2^30).
