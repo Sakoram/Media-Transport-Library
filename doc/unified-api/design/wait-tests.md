@@ -48,6 +48,8 @@ results ring, the hold and the REPEAT pins), with their decisions and run lines,
 | [final_model.py](models/final_model.py) | the object path of wait-protocol.md (cases o1–o7), the queue path (q1–q11, r1–r4) and posts (p1–p5); 23 mutants named by the step they break; LOST, LEAK, OVER, SPIN, XQ, RPT, PAC (§1.1) | `python3 final_model.py [CASE ...]`; `--trace CASE MUTANT` prints a counterexample; exit 1 unless every case gives its result and every mutant dies (6 s) |
 | [wait_flush.py](models/wait_flush.py) | the count-bounded flush (F1–F8) of one library loop over three objects, sleepers arming while marks are carried, the loop's sleep check; the variant that ignores the flush's return; from M0 a queue entry among the marked entries and `wake_k` 1 and 4 | `python3 wait_flush.py`; the design cases must print LOST=0, the "return ignored" variant LOST > 0 |
 | [stress.c](models/stress.c) | random-yield stress on the real kernel (futex, eventfd, epoll LT or EPOLLONESHOT). Until M0 it still drives the superseded per-object handle (D-159); M0 rewrites it onto the event word and a queue consumer, with the mutants `-DBITS`, `-DLOAD_AFTER_ATTEMPT`, `-DNO_EXIT_RESIGNAL` | `cc -O2 -pthread stress.c -o stress; ./stress ROUNDS [1]`; a smoke test, not evidence |
+| [legacy_wake.py](models/legacy_wake.py) | the legacy wake modes (wait-protocol.md LW1–LW2) of a re-based pipeline's `BLOCK_GET` get (DP, then WT) against a model of today's st20p mutex and condition variable: the main cases' properties on both, every result among today's (the several-blocked-TX-gets cases among today's with POSIX spurious wakeups), | |
+| legacy_wake.py, continued | LEAK, STUCK, its mutants; `--any-deadline` (a deadline at any step, safety) and `--wt-only` (the get as WT alone) | `python3 legacy_wake.py [--wt-only \| --any-deadline]`; exit 1 unless every case gives its result and every mutant dies (under 1 s) |
 
 `final_model.py`'s object path covers the event word with counts, calls with a timeout,
 interrupts and their clearing (`MTL_INTR_OFF`, then a new call: o7), close and row waits; its
@@ -85,7 +87,9 @@ model.
 
 Task M0 adds `check_labels.py` (the label sets of wait-protocol.md §3, §5, §6 and §7, of the model and of
 `st_core_wait.c` once it exists must agree, minus the `NOT_MODELLED` list) and `run_models.py`, the
-model job's one entry point. C1w copies the model files into `tests/unit/core/wait_model/` with
+model job's one entry point. `legacy_wake.py`, not `final_model.py`, models LW1 and LW2: M0 adds
+them to `final_model.py`'s `NOT_MODELLED` list, in the commit that makes the models pass the
+repository's Python lint (black, flake8, ruff), which every edit of a model file now needs. C1w copies the model files into `tests/unit/core/wait_model/` with
 `run_models.py`; a changed protocol step changes the model in the same commit, and
 `check_labels.py` compares the labels. The reviewer does not.
 
@@ -157,6 +161,10 @@ library.
 | WC4 `WaitHook.rows_want` | `rows_step` 34 over 2160 rows; readers for 540 and 1080 | 0 wakes before 540, one each after | `want_store`; RW1 firing per step | MS2 |
 | WC5 `WaitHook.sleeper_beyond_count` | one sleeper more than a lane's count holds, on one target; one unit | the last returns within 2 ms; no thread spins | T6 returning at once | C1w |
 | WC6 `WaitHook.slot_beside_acquire` | a sleeper in `mtl_tx_acquire_slot(s, i, ∞)` with slot i busy and a sleeper in `mtl_tx_acquire(∞)`, both on lane 0; release another slot | `acquire` returns that slot; `acquire_slot` returns only when slot i is free; no thread spins | a K1 that wakes one sleeper of the lane | MS2 (`acquire_slot`) |
+| WH22 `WaitHook.legacy_token` | a `ST_CORE_LEGACY_WAKE_TOKEN` session on `TestBinding`; B in a legacy dequeue (DP, then WT 1 s) parked at `WT_BEFORE_SLEEP`; LW1; a unit published and taken by A's DP; resume B. Variants: two sleepers and one LW1; LW1 before the call; a unit published before LW1 | | | |
+| WH22, continued | | B returns `-MTL_ECANCELED` without sleeping again (a futex-return counter); A holds the unit. Two sleepers: one `-MTL_ECANCELED`, one `-MTL_EAGAIN` at its deadline. LW1 first: `-MTL_ECANCELED` at once. With the unit: B returns it and the token is spent | `dp_spends`, `tok_load_store`, `no_final_attempt` (legacy_wake.py) | RB2 |
+| WH23 `WaitHook.legacy_edge` | a `ST_CORE_LEGACY_WAKE_EDGE` session on `TestBinding`; W in a legacy acquire (DP, then WT 1 s) parked at `WT_BEFORE_ARM`; LW1; resume. Variants: a slot released before LW1; LW1 with no call, then a call; two sleepers and one LW1 | | | |
+| WH23, continued | | `-MTL_ECANCELED`; with the slot: the slot; LW1 first: `-MTL_EAGAIN` at the deadline; two sleepers: both `-MTL_ECANCELED` | `kick_no_event`, `edge_before_t4`, `edge_as_token`, `edge_reload` (legacy_wake.py) | RB1 |
 
 ### 5.2 The queue path (MS2a)
 
@@ -201,11 +209,11 @@ Each test lands with the task that makes it runnable:
 | C1w | WH2, WH3, WH10, WH11 (close and stop), WH12, WH14b, WH15, WH16, WH21, WC1–WC3, WC5, on `TestBinding` |
 | C2 | WH11 (ERROR), WH17, WH19, WH20, and the `NullBinding` runs |
 | A2a | ex16's SIGTERM form |
-| MS2 | WC4 (rows), WC6 (`acquire_slot`) |
+| MS2 | WC4 (rows), WC6 (`acquire_slot`); WH23 (RB1), WH22 (RB2) |
 | C1q1 (MS2a) | QW1–QW5, QW7, QW10–QW12, QW14, QW18, QW20–QW22 |
 | C1q2 (MS2a) | WH14, QW6, QW8, QW9, QW13, QW15–QW17, QW19; WH15's and WH21's queue parts; ex03's public form |
 
-Totals: 16 tests in MS1, 2 in MS2, 23 in MS2a. Retired IDs, never reused: WH1, WH4–WH9, WH13,
+Totals: 16 tests in MS1, 4 in MS2, 23 in MS2a. Retired IDs, never reused: WH1, WH4–WH9, WH13,
 WH13b and WH18 (the per-object descriptor that queues replaced, [D-159](../decisions.md)).
 
 ## 7. Argued and tested, not modelled

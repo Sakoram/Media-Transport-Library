@@ -49,7 +49,7 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | Options, stats, errors and logs | D-19, D-21, D-73, D-80, D-81, D-84, D-128, D-129, D-139, D-153, D-154, D-175, D-244 | OI-40, OI-50, OI-54, OI-65, OI-69 | contract.md, engine.md |
 | Headers and structs | D-05, D-33, D-34, D-45, D-71, D-72, D-74, D-97, D-104, D-105, D-137, D-140, D-185, D-187, D-195, D-217, D-223 | OI-70 | the headers, contract.md, README.md |
 | Versioning and export | D-23, D-83, D-106, D-108, D-190, D-191, D-194 | OI-64 | migration.md |
-| Legacy APIs and engines | D-18, D-24, D-27, D-57, D-112, D-114, D-123, D-125, D-178, D-189, D-197, D-240 | OI-3, OI-81 | migration.md, engine.md |
+| Legacy APIs and engines | D-18, D-24, D-27, D-57, D-112, D-114, D-123, D-125, D-178, D-189, D-197, D-240, D-246 | OI-3, OI-81 | migration.md, engine.md |
 | Validation and process | D-64, D-66, D-87, D-98, D-107, D-109, D-110, D-113, D-135, D-136, D-138, D-184, D-188, D-200, D-245 | — | implementation-plan.md, autonomous-run.md |
 | Deployment and pods | D-49, D-63, D-69, D-89, D-90, D-91, D-92, D-116, D-117 | OI-23, OI-43, OI-75 | deployment.md |
 | NMOS, SDP and IPMX | D-93, D-94, D-95, D-96, D-196 | — | nmos-ipmx.md |
@@ -291,6 +291,7 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | D-243 | One keep-alive value: `MTL_UNDERRUN_KEEPALIVE` is the essence's keep-alive at its standard's cadence and the default of ANC and fastmeta; `MTL_UNDERRUN_EMPTY_ANC` is removed and value 2 retired; SKIP is refused for ANC and fastmeta frame units (`OPTION_RANGE`); packet units keep SKIP. | timing.md §6.4 |
 | D-244 | Stats: `tx.units_repeated` removed; `tx.units_padded` → `tx.indices_filled`, a subset of `tx.indices_empty`; `rx.units_zero_filled` → `rx.units_filled` and `rx.bytes_zero_filled` → `rx.bytes_filled`, for every essence. Amends D-203. | contract.md §11.3 |
 | D-245 | The autonomous run (2026-10-16): agents implement MS1–MS7 with no maintainer available. Its process rules replace the maintainer's approvals, checkpoints and stop-and-ask for the run. Questions and plan bugs are decided by competing designers and a judge, and recorded as D-rows to confirm. Each commit is pushed to the fork branch `unified-api-impl`. Amends D-135 | autonomous-run.md |
+| D-246 | The legacy `BLOCK_GET` get (st20p MS2b; st22p, st30p, st40p MS4) is DP, then WT with the session's legacy wake mode; `wake_block` is LW1: a store to `lkick` on the in-flight line, then EVENT on lane 0. (continued below the table) | wait-protocol.md §3, migration.md §6.5 |
 
 Rows too long for the table, continued:
 
@@ -496,6 +497,16 @@ Rows too long for the table, continued:
   L) × L bytes, L = LCM(pgroup, 64), in `internal_bytes`; within 1.2× of `memset`. Lost ranges are
   no longer recognisable in the pixels; `MTL_SESSION_RX_NO_FILL` leaves the slot's previous bytes.
   Amends D-37 and D-203 for video, and D-183.
+- **D-246**, continued: TX, `ST_CORE_LEGACY_WAKE_EDGE`: after a failed attempt the wait ends once
+  `lkick` moved since its T1, so a wake with no blocked get does nothing and every get blocked at
+  the call ends (today the others end at their next wake-up). RX, `ST_CORE_LEGACY_WAKE_TOKEN`: a
+  one-shot token that DP never reads, spent by `xchg` between T3 and T4, then one attempt. Unified
+  calls never run LW2. Why: main pins an RX token and a TX edge; WT reads no wrapper word, so only
+  the core can end its own sleep on a legacy wake; the old "T3 returns when `kick` moved" was a
+  legacy check without a mode that ended every RX get and returned NULL beside a ready frame; RX's
+  token on TX would undo `0d05bbd40`'s no-op (SF-91), and counters in the wrapper break the bool
+  token (`legacy_wake.py`). Taken in the autonomous run (2026-10-20, D-245); to confirm by the
+  maintainer
 
 ## 3. Why: prior art
 

@@ -1501,18 +1501,69 @@ about 60 + 120 lines to C1q1 and C1q2 together.
 - **Converter plugins:** on the transform claim and done (D-100).
 - **The st20p re-base on the core:** last, after the nightly comparison has burned in: `get_frame`
   = acquire seen as `st_frame`; `put_frame`/`put_ext_frame` = submit; `put_frame_abort` = release;
-  `BLOCK_GET` = the core's wait (fixes SF-15; keeps SF-16's fix, LB-14); one notifier thread of the instance, on an
-  internal queue, calls the legacy notifier once per published unit (`pub_seq`), exactly once (R2).
-  Auto-detect, user meta, timing-parser meta and drop-when-late live in the video bindings. Safety
-  net: the 44 `St20p` cases, the pipeline unit tests and T1's parity tests. Its tasks are below,
-  with the ledger (migration.md §6.5) as their input.
+  `BLOCK_GET` = DP, then the core's wait with a legacy wake mode (fixes SF-15; keeps main's waiting
+  and `wake_block`, LB-06, LB-14, LB-15); one notifier thread of the instance, on an internal queue,
+  calls the legacy notifier once per published unit (`pub_seq`), exactly once (R2). Auto-detect,
+  user meta, timing-parser meta and drop-when-late live in the video bindings. Safety net: the 44
+  `St20p` cases, the pipeline unit tests (main's wait cases ported, the wait pins below) and T1's
+  parity tests. Its tasks are below, with the ledger (migration.md §6.5) as their input.
 - **Tests:** waves 2c and 3a of §8.7; WC6 (`WaitHook.slot_beside_acquire`, design/wait-tests.md).
 
 | # | Task | Depends on | Size | Gate 6 | Exit |
 |---|---|---|---|---|---|
-| RB0 | the st20p ledger: every st20p row of migration.md §6.5 decided (keep or change; a change is a D-24 bugfix or a D-row; the open rows are OI-81), each kept row with its mechanism and a pinning test written and green on today's st20p | the MS2a nightly burn-in | 300 test + doc | — | the maintainer's approval of the ledger (a checkpoint); the new UB tests green on legacy st20p |
-| RB1 | st20p TX re-based on the core: `get_frame` = acquire, `put_frame`/`put_ext_frame` = submit, `put_frame_abort` = release, `BLOCK_GET` = the core's wait, one notifier (R2); the `ST_CORE_LEGACY_*` modes of the ledger, no other | RB0 | ≤ the cap | yes | the frozen `St20p` TX cases, T1, the RB0 tests green; `check.sh` lint 8 green |
-| RB2 | st20p RX re-based on the core | RB0, RB1 | ≤ the cap | yes | the frozen `St20p` RX cases, T1 RX, the RB0 tests green |
+| RB0 | the st20p ledger: every st20p row of migration.md §6.5 decided (keep or change; a change is a D-24 bugfix or a D-row; the open rows are OI-81), each kept row with its mechanism and a pinning test written and green on today's st20p | the MS2a nightly burn-in | 300 test + doc | — | |
+| RB0, continued | | | | | the maintainer's approval of the ledger (a checkpoint); the new UB tests and the five new wait pins (below) green on legacy st20p; `legacy_wake.py` in `run_models.py` |
+| RB1 | st20p TX re-based on the core: `get_frame` = acquire, `put_frame`/`put_ext_frame` = submit, `put_frame_abort` = release, `BLOCK_GET` = the core's wait, one notifier (R2); the `ST_CORE_LEGACY_*` modes of the ledger, no other | RB0 | ≤ the cap | yes | the frozen `St20p` TX cases, T1, the RB0 tests green; the TX wait pins below ported and green; WH23; `check.sh` lint 8 green |
+| RB2 | st20p RX re-based on the core; `ST_CORE_LEGACY_WAKE_TOKEN` (LB-15), no other mode | RB0, RB1 | ≤ the cap | yes | the frozen `St20p` RX cases, T1 RX, the RB0 tests green; the RX wait pins below ported and green; WH22 |
+
+**The wait pins of RB0–RB2** (D-246). Main's wait cases in `tests/unit/pipeline/` pin LB-06,
+LB-14 and LB-15. Their bodies call only the harness. RB1 (TX) and RB2 (RX) rewrite the bodies of
+the harness functions in `st20p_tx_harness.c` and `st20p_harness.c` onto the wrapper, and keep
+their names and contracts. In the "ported" rows the case's body is unchanged. Each internal hook
+maps onto the core:
+
+- a notify without a frame (`ut20p_notify_frame_available`, `ut20p_tx_frame_free_wake`) is
+  EVENT(s, lane 0) with no publish;
+- a frame set with no notify (`ut20p_set_frame_ready`, `ut20p_set_frame_converted`) is a slot
+  stored PUBLISHED with no EVENT, a unit-test seam;
+- `force_destroying` is the wrapper's destroying flag and the close's CLOSING store, without its
+  wake;
+- `begin_destroy` is the wrapper's free up to the close's wake, without the drain;
+- `ut20p_tx_frame_stat` reads the core slot's state as today's numbers (FREE 0, APP 5);
+- put, next frame and frame done are submit and the video TX binding's `get_next_frame` and
+  `notify_frame_done`;
+- the convert hook stays in the wrapper's in-caller conversion.
+
+No main case is deleted. The st22p, st30p and st40p twins map the same way at their re-base. The
+RX twins follow LB-15's rule and the TX twins LB-14's. The st22p codec waits go with plugin ABI v2
+(U-381).
+
+| Main case (instances) | LB row | Fate | Commit |
+|---|---|---|---|
+| `St20PipelineRxBlocking.StaleFrameWakeDoesNotSkipTheWait` (Derive, InternalConverter) | LB-06 | ported | RB2 |
+| `St20PipelineRxBlocking.FrameReadyWakesABlockedGet` (×2) | LB-06 | ported | RB2 |
+| `St20PipelineRxBlocking.RepeatedNotifiesDoNotMoveTheDeadline` (×2) | LB-06 | ported | RB2 |
+| `St20PipelineRxBlocking.DestroyEndsTheWaitWithoutAFrame` (×2) | LB-06 | ported | RB2 |
+| `St20PipelineRxBlocking.DestroyEndsEveryBlockedGet` (×2) | LB-06 | ported | RB2 |
+| `St20PipelineRxBlocking.UnsignalledFrameIsClaimedAtTimeout` (×2) | LB-06 | ported (pins T4 before T5) | RB2 |
+| `St20PipelineRxBlocking.WakeBlockEndsTheWait` (×2) | LB-15 | ported | RB2 |
+| `St20PipelineRxBlocking.WakePostedBeforeWaitIsNotLost` (×2) | LB-15 | ported | RB2 |
+| `St20PipelineRxBlocking.OneWakeSatisfiesOnlyOneWait` (×2) | LB-15 | ported | RB2 |
+| `St20PipelineRxBlocking.FastPathGetDoesNotStealTheWakeOfABlockedGet` (×2) | LB-15 | rewritten in place under its name: B parked at `WT_BEFORE_SLEEP` (`ST_CORE_WAIT_HOOK`, in `UnitTest` with `-Denable_unit_tests=true`); a frame set ready; `st20p_rx_wake_block`; A's get takes the frame on DP; B resumed returns NULL before half its timeout; no `GTEST_SKIP`. | RB2 |
+| `St20PipelineRxBlocking.FastPathGetDoesNotStealTheWakeOfABlockedGet`, continued | | The commit deletes `ut20p_lock_block_mutex`, `ut20p_post_wake_locked` and `ut20p_unlock_block_mutex` | |
+| `St20PipelineRxBlockingConvert.WakePostedDuringAConversionEndsTheNextGet` | LB-15 | ported | RB2 |
+| `St20PipelineTxBlocking.BlockedGetFrameWakesPromptlyOnGenuineFree` | LB-06 | ported | RB1 |
+| `St20PipelineTxBlocking.StaleWakeFromEarlierFastPathDoesNotShortCircuitBlock` | LB-06 | ported | RB1 |
+| `St20PipelineTxBlocking.DestroyDuringWaitNeverHandsOutAClaimedFrame` | LB-06 | ported | RB1 |
+| `St20PipelineTxBlocking.ContendedLosingConsumerHonorsAbsoluteDeadline` | LB-06 | ported | RB1 |
+| `St20PipelineTxBlocking.DestroyEndsEveryBlockedGet` | LB-06 | ported | RB1 |
+| `PipelineTxWakeBlock.St20pWakeEndsBlockedGetFrame` | LB-14 | ported | RB1 |
+| `PipelineTxWakeBlock.St22pWakeEndsBlockedGetFrame`, `.St30p…`, `.St40p…` | LB-13, LB-12 | unchanged in MS2b; ported at their re-base | MS4b, MS4a1, MS4a2 |
+| new `St20PipelineTxBlocking.WakeBlockWithNoWaiterDoesNotEndALaterWait` | LB-14 | green on today's st20p, then ported | RB0, RB1 |
+| new `St20PipelineTxBlocking.FrameFreedWithTheWakeIsReturned` | LB-14 | green on today's st20p, then ported (on the core the release runs EVENT; WH23 orders T4 before LW2) | RB0, RB1 |
+| new `St20PipelineRxBlocking.OneWakeEndsOneOfTwoBlockedGets` (×2) | LB-15 | green on today's st20p, then ported | RB0, RB2 |
+| new `St20PipelineRxBlocking.TwoWakesBeforeAWaitEndOneWait` (×2) | LB-15 | green on today's st20p, then ported | RB0, RB2 |
+| new `St20PipelineRxBlocking.FrameReadyWithTheWakeIsReturned` (×2) | LB-15 | green on today's st20p, then ported | RB0, RB2 |
 
 Exit: every ST20 legacy capability of coverage.md §6 has a unified path except packet units (MS5) and the
 timing subset of MS3; the legacy st20p suites green on the core; ex10, ex11, ex12 run (ex08

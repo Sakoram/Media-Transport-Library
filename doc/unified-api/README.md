@@ -183,9 +183,9 @@ of every task and the standing instructions are in [ms1-status.md](ms1-status.md
 | SF-n, SP-n, DD-n, H-K-n | defects and drift in today's code; pod hazards | [engine.md](engine.md) §7 |
 | H1–H10, W0–W2 and the notifier contingency | pinned-core hazards, wake-up mechanisms | [engine.md](engine.md) §1, [wait-protocol.md](wait-protocol.md) §4 |
 | S0, S1, S4–S8 | measurements (spikes) | [engine.md](engine.md) §6.1, [implementation-plan.md](implementation-plan.md) §3.3 |
-| WH2–WH21, WC1–WC6, QW1–QW22 | the pause-hook tests of the wait protocol | [design/wait-tests.md](design/wait-tests.md) §5 |
+| WH2–WH23, WC1–WC6, QW1–QW22 | the pause-hook tests of the wait protocol | [design/wait-tests.md](design/wait-tests.md) §5 |
 | o1–o7, q1–q11, r1–r4, p1–p5; the mutants | the model cases of the wait protocol and the mutants named by the step they break | [design/wait-tests.md](design/wait-tests.md) §1.1 |
-| E1–E4, M1, K1–K2, F1–F8, T1–T9, D1–D2, Q1–Q3, RW1–RW2, N0', N1–N9, V1–V2, X1–X4, Y1–Y2, P1–P3, PS1–PS4, U1–U2, A1–A11, J1–J10, C1–C5, DV1–DV3 | the step labels of the wait protocol, each local to its procedure | [wait-protocol.md](wait-protocol.md) |
+| E1–E4, M1, K1–K2, F1–F8, T1–T9, D1–D2, Q1–Q3, RW1–RW2, LW1–LW2, N0', N1–N9, V1–V2, X1–X4, Y1–Y2, P1–P3, PS1–PS4, U1–U2, A1–A11, J1–J10, C1–C5, DV1–DV3 | the step labels of the wait protocol, each local to its procedure | [wait-protocol.md](wait-protocol.md) |
 | ST1–ST9 | the S1 thresholds | [implementation-plan.md](implementation-plan.md) §8.4 |
 | SR1–SR3, SR6 | the S1 decision rules | [engine.md](engine.md) §6.1 |
 | U-001…U-420, H-01…H-19, CUT-n | legacy capabilities, pre-hide gaps, the cut list | [coverage.md](coverage.md) |

@@ -32,7 +32,7 @@ cases, the mutants and the pause-hook tests that check the protocol are
 
 | IDs | Kind | Defined in |
 |---|---|---|
-| E1–E4, M1, K1, K2, T1–T9, D1, D2, Q1–Q3, RW1, RW2 | steps of the object path | [3. The object path](#3-the-object-path) |
+| E1–E4, M1, K1, K2, T1–T9, D1, D2, Q1–Q3, RW1, RW2, LW1, LW2 | steps of the object path | [3. The object path](#3-the-object-path) |
 | F1–F8 | steps of the flush | [4. The deferred wake](#4-the-deferred-wake) |
 | N0', N1–N9, V1, V2 | steps of an interrupt and of the instance walk | [5. Interrupts](#5-interrupts) |
 | X1–X4, Y1 | steps of retire and reuse | [6. Close, retire and reuse of an entry](#6-close-retire-and-reuse-of-an-entry) |
@@ -83,6 +83,7 @@ An interrupt of RX `MTL_WAIT_DEQUEUE` selects lanes 0 and 1. A state change has 
 | line A (MS2a) | `alink[4]` | u64 per slot `{next:20 \| qidx:16 \| qgen:16 \| lanes:4 \| fired:5}`; fired's fifth bit is STATE | the slot's owner: J6 (qidx, qgen, lanes), P2 (next, fired) | P1, A5 | relaxed atomics; published by the `HA` CAS (J8 release, E4 acquire) and by `qword` (P2 release, A4 acquire) | per use |
 | entry in-flight line (application threads; read-mostly) | `inflight` | u64 | every data call (D1, T1, Q1, A1, J1) | X2, C2 | seq_cst add, release sub | never |
 | in-flight line | `intr` | u64 `{gen:32 \| targets:32}` | N5 (CAS, the handle's generation checked), Y1 (`{new gen, 0}`) | T3, Q2 (relaxed: ordered by `ec`), A9 for the instance's queues (seq_cst) | seq_cst CAS | Y1 |
+| in-flight line (MS2b; a session with a legacy wake mode) | `lkick` | u32: `ST_CORE_LEGACY_WAKE_TOKEN` (RX) a token, 0 or 1; `ST_CORE_LEGACY_WAKE_EDGE` (TX) the count of `wake_block` calls | LW1 (store 1, or `fetch_add`; release), TOKEN's LW2 (`xchg` 0, acq_rel) | LW2, EDGE's T1 (`k0`) | relaxed loads, ordered by `ec`: LW1 is an E1, LW2 follows T2 | Y1 |
 | entry line C (MS2a; application threads) | `astate[4]`, `user[4]` | u8 `{state:2 (FREE, IDLE, ARMED, DEAD) \| want:4}`; u64 | under the queue's lock: J4a–J6, A5, X3, C3, C4. Without it, only P2's stale path (FREE; the node is the claimer's) | the same | relaxed atomics | Y1 (FREE; a DEAD slot stays busy until its pop) |
 | slot line (MS2) | `progress` | u64 `{rows:31 \| ended:1 \| want:32}` | RW1 (the binding: `fetch_add`, `fetch_or`, `fetch_and`), RW2 (the reader: CAS) | RW1, RW2, TX `query_frame_lines_ready` (rows only) | RMW only | per use |
 | queue entry line A (MS2a; never freed) | `qword` | u64 `{head:20 \| qgen:16 \| ARMED:1 \| CLOSED:1 \| post:24}`; head = node (index(o) << 2 \| i) + 1, 0 = empty; post = bits not yet taken | P2 (CAS), PS2 (CAS), A4 (CAS head and post → 0), A8 (CAS ARMED), U1 (`fetch_or` CLOSED), U2 (CAS ARMED → 0), C3, Y2 | everything on the queue path | acq_rel; A8 and U2's load seq_cst | Y2 |
@@ -116,7 +117,8 @@ EVENT(o, F): after every change that can make a target of the lanes F ready
 E1  publish (release is enough): the completion's PUBLISHED or FREE store, W or not (D-209),
     and a TX HELD -> PUBLISHED or FREE store (a pin release, the last repeat use) | a release's
     APP -> FREE CAS | store(reap_seq) | RW1's progress RMW | an event's pending state |
-    store(state) (F = every lane) | N5's CAS of intr (F = its lanes) | MS5: the ring-RX
+    store(state) (F = every lane) | N5's CAS of intr (F = its lanes) | LW1's store of lkick
+    (F = lane 0) | MS5: the ring-RX
     enqueue crossing packet.rx_min_packets or a marker, and the tick that sees
     packet.rx_max_wait_ns pass (both TK, through st_core_event)
 E2  a = fetch_add(ec(o), SEQ, acq_rel)
@@ -144,12 +146,21 @@ F6  an object: F = xchg(fired(entry(i)), 0, acquire); a queue: F = xchg(owed(ent
 F7  if (F) { if (WAKE_NOW(entry(i), F) > 0) n++; else z++ }
 
 WT(o, M, timeout): every data call with timeout != 0; L = lanes(M)
-T1  deadline = timeout == MTL_FOREVER ? NONE : now(CLOCK_MONOTONIC) + timeout; enter
+T1  deadline = timeout == MTL_FOREVER ? NONE : now(CLOCK_MONOTONIC) + timeout; enter;
+    ST_CORE_LEGACY_WAKE_EDGE: k0 = load(lkick(o), relaxed)
 T2  e = load(ec(o), acquire)        (mtl_rx_wait_rows: also p = load(progress, acquire), RW2)
 T3  c = the state's code for M; if none and (bits(intr(o)) | bits(intr(I))) & M:
     c = -MTL_ECANCELED (intr(I) loaded seq_cst); if (c) { leave; return c }
 T4  r = ATTEMPT(o, M) (mtl_wait: the ready subset; the predicate's loads first, the reaper
     lock only when it is READY); if (r >= 0) { the call's own sources; leave; return r }
+LW2 (MS2b) only the WT of a legacy st*p BLOCK_GET get, a lane-0 call (acquire, dequeue) of a
+    session with a legacy wake mode, run after its failed DP at every block timeout, 0 included
+    (migration.md §6.5 LB-14, LB-15); every other call skips it:
+    ST_CORE_LEGACY_WAKE_TOKEN (RX), between T3 and T4 of every pass: if (load(lkick(o), relaxed)
+        && xchg(lkick(o), 0, acq_rel)) { r = ATTEMPT(o, M); leave;
+        return r >= 0 ? r (the call's own sources) : -MTL_ECANCELED }
+    ST_CORE_LEGACY_WAKE_EDGE (TX), after every failed T4: if (load(lkick(o), relaxed) != k0)
+        { leave; return -MTL_ECANCELED }
 T5  if (deadline passed) { leave; return -MTL_EAGAIN }
 T6  if (a lane of L counts 127 in e) { futex(&seq(o), FUTEX_WAIT_BITSET|FUTEX_PRIVATE_FLAG,
     seq(e), min(deadline, now + 1 ms), L); goto T2 }        // uncounted: it re-checks
@@ -173,6 +184,10 @@ RW1 the RX binding, per rows step d (the unit's end: fetch_or(progress, ended)):
     if (w && (rows(old) + d >= w || ended)) { fetch_and(progress, ~WANT); EVENT(s, lane 1) }
 RW2 mtl_rx_wait_rows, between T4 and T7: CAS(progress, p, p with want = want(p) ?
     min(want(p), min_rows) : min_rows), else goto T2
+
+LEGACY_WAKE(s) (MS2b): st*p_*_wake_block() of a BLOCK_GET session; an application thread
+LW1 TOKEN: store(lkick(s), 1, release); EDGE: fetch_add(lkick(s), 1, release);
+    then E2-E3 of EVENT(s, lane 0) (an application thread: WAKE_NOW)
 ```
 
 The call's own sources:
@@ -182,7 +197,7 @@ The call's own sources:
 - a failed in-caller conversion, or submit's own flush (D-121), runs EVENT(o, RESULTS | ACQUIRE).
 
 In MS1, E4, K2, POST, the queue branches of N6, V2 and CLOSE, and X3 are not built (their steps are in §3 and §5–§7): `HA` is always 0. RW1–RW2
-land in MS2.
+land in MS2; LW1–LW2 in MS2b (EDGE in RB1, TOKEN in RB2), and they go at F+2 with the wrappers.
 
 ## 4. The deferred wake
 
@@ -591,6 +606,20 @@ it never busy-loops.
   AS path needs no in-flight count.
 - N6 and V2 wake directly (K1) and never touch a loop's bitmap.
 
+**The legacy wake modes** (LW1–LW2, MS2b, D-246).
+
+- LW1 is an E1: its store of `lkick` precedes E2. LW2 follows T2 in its pass, so the
+  single-location lemma holds as stated: LW2 sees `lkick`, or T7 fails, or E3 sees the count.
+- The TOKEN spend is one RMW, so one wake ends one wait, and the other sleepers re-arm to the
+  deadline of their T1. DP never reads `lkick`, so a fast-path get never spends a wake meant for a
+  blocked one.
+- EDGE ends every get whose T1 loaded `lkick` before the wake, once its attempt failed. Today the
+  signalled get returns at once and the others at their next wake-up (migration.md §6.5 LB-14).
+- A session without a mode never runs LW2 and never reads `lkick`, so T1–T9, cases o1–o7 and their
+  mutants are the steps of every unified call.
+  [design/models/legacy_wake.py](design/models/legacy_wake.py) compares the modes with a model of
+  today's st20p wait.
+
 **Lifetime.**
 
 - The futex word and every word of line A live as long as the process.
@@ -783,6 +812,8 @@ Until `0d05bbd40` a TX `*_wake_block()` did not make `get_frame` return early: t
 slept again until the deadline (SF-16), so shutdown took up to the 1 s block timeout. Today the
 TX wait ends when the count of `wake_block` calls moved (`st20_pipeline_tx.c:787-797`); on RX
 `wake_block` sets a token that the next get that waits spends (`st20_pipeline_rx.c:29-35`,
-`:866-876`). From the MS2b re-base `wake_block` increments the wrapper's `kick` and runs
-EVENT(s, ACQUIRE), and the legacy wait's T3 also returns when `kick` moved, so a blocked
-`get_frame` returns NULL once (migration.md §6.5, LB-14).
+`:866-876`). From the MS2b re-base the legacy get is DP, then WT with the session's legacy wake
+mode, and `wake_block` is LW1 (§3). On TX the wait ends when `lkick` moved since its T1, so a wake
+with no blocked get does nothing (`ST_CORE_LEGACY_WAKE_EDGE`, migration.md §6.5 LB-14). On RX it
+spends a one-shot token that DP never reads (`ST_CORE_LEGACY_WAKE_TOKEN`, LB-15). Both attempt
+before they return NULL, so a frame claimable at the wake is returned.

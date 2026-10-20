@@ -63,6 +63,8 @@ confirm. One row each; the D-row holds the decision itself.
 
 | Date | Milestone, task | Question or bug | D-row | Evidence (test, model, review file) |
 |---|---|---|---|---|
+| 2026-10-20 | R0 | WAKE: what the legacy pipeline wait keeps after main's wake fixes (LB-14's `kick` was undefined; how RB0–RB2 keep main's blocking unit cases green) | D-246 | |
+| 2026-10-20, continued | | | | `/home/labrat/wip/unified-api-impl/r0/design/wake/verdict.md`; model `design/models/legacy_wake.py` (`/home/labrat/wip/unified-api-impl/r0/design/wake/judge/legacy_wake.out`, `judge/break_wk_a.out`); `UnitTest --gtest_filter='*St20PipelineRxBlocking*:*St20PipelineTxBlocking*:*PipelineTxWakeBlock*'`: 30 passed |
 
 ## 4. Blocked outside the run
 
@@ -71,6 +73,7 @@ run prepared for each.
 
 | Item | Needed by | Prepared | What the maintainer must do |
 |---|---|---|---|
+| R0: the guard denied a Bash call ("never print environment variables"), a Python heredoc that tagged `final_model.py`'s flake8 findings with `noqa`, to add D-246's labels LW1, LW2 | M0 | `final_model.py` unchanged; design/wait-tests.md §1 gives the labels to M0; `/home/labrat/wip/unified-api-impl/denied/r0-final-model-noqa.md` | review the guard's pattern |
 
 ## 5. Final report
 
