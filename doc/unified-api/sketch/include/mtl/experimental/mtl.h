@@ -1101,7 +1101,7 @@ enum mtl_ptime { /* enum st30_ptime + 1 */
   MTL_PTIME_4MS = 5,
   MTL_PTIME_80US = 6,   /* ST31_PTIME_80US: the ST 2110-31 0.08 packet, 4 samples at 48 kHz
                            (8 at 96 kHz), one packet every 83 1/3 us (Table 1); the
-                           legacy engine sends one every 80 us (SF-35) */
+                           legacy engine sent one every 80 us until 7cbe505d5 (SF-35) */
   MTL_PTIME_1_09MS = 7, /* 44.1 kHz: ST31_PTIME_1_09MS */
   MTL_PTIME_0_14MS = 8,
   MTL_PTIME_0_09MS = 9,

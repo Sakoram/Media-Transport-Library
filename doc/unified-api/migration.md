@@ -132,7 +132,7 @@ with the unified one.
 | TX SSRC | deterministic: `idx + 0x123450` video, `+ 0x223450` audio, `+ 0x323450` ANC, fast metadata included (`st_tx_video_session.c:983`, `st_tx_audio_session.c:188`, `st_tx_ancillary_session.c:259`) | random (RFC 3550 §8): set `sc.ssrc` to keep one, or capture filters keyed on the SSRC break silently |
 | time without PTP | any reader accepted | `ip.time_source` 0 is `MTL_TIME_SOURCE_AUTO`, which never starts the built-in PTP client; how it picks its source is [timing.md §2.2](timing.md#22-time-sources). An estimated source is accepted, but times are flagged ESTIMATED with a timing warning (`TIME_ESTIMATED`) |
 | interlaced rate | `ops.fps` is the field rate | `raster.fps` is the frame rate: `mtl_raster_from_legacy()` halves it; above 30 frames per second interlaced is `-MTL_EINVAL` (§5.1) |
-| audio `ST31_PTIME_80US` | 4 samples at 48 kHz every 80 µs: a 50 kHz RTP rate (SF-35) | 4 samples every 83⅓ µs, as ST 2110-31 Table 1 defines; `info.ptime_ps` reports it ([timing.md](timing.md) §8) |
+| audio `ST31_PTIME_80US` | the same since `7cbe505d5` (SF-35, fixed on main); before, 4 samples every 80 µs, a 50 kHz RTP rate | 4 samples every 83⅓ µs, as ST 2110-31 Table 1 defines; `info.ptime_ps` reports it ([timing.md](timing.md) §8) |
 | user-paced video launch (`USER_PACING`) | paced from the epoch nearest the user's time | TAI media mode derives the launch from the media time, so TX moves by TROFFSET − VRX0 × TRS, about 604–619 µs at 1080p59.94 ([timing.md](timing.md) §14.1); `MTL_SUBMIT_NOT_BEFORE` keeps the "send at t" reading |
 | late frames with `USER_TIMESTAMP` | slip: sent at the next epoch | dropped (`MTL_TX_DROPPED`, `TOO_LATE`): INDEX and TAI drop a late unit; only AUTO defers |
 | unknown struct bytes or flag bits | ignored | `-MTL_EINVAL` (`NONZERO_TAIL`, `UNKNOWN_BITS`) |
@@ -556,7 +556,8 @@ raster and launch delay of the first video session of its start array (MS6).
 
 `sc.essence = MTL_FASTMETA`. Fast metadata is an opt-in of the ST40 sessions since `88d47ac83`:
 `ST40_TX_FLAG_FAST_METADATA` (bit 9) and `ST40_RX_FLAG_FAST_METADATA` (bit 3) select it
-(`include/st40_api.h:82-102`, `:152-158`); RX is RTP level only.
+(`include/st40_api.h:82-102`, `:152-158`); RX is RTP level only, and TX refuses `SPLIT_ANC_BY_PKT`
+with it (`st_tx_ancillary_session.c:2268-2271`).
 
 | Converted as §4.1 | Legacy names |
 |---|---|
@@ -566,8 +567,9 @@ raster and launch delay of the first video session of its start array (MS6).
 | Legacy field | New field or option | Conversion |
 |---|---|---|
 | `fps` (TX) | `f.video.fps` | +1; interlaced: halve |
-| `fmd_dit` (TX only; the RX filter went with st41) | `f.data_item_type` | same; RX 0xffffffff (no check) → leave `MTL_FASTMETA_RX_MATCH_DIT` unset in `f.fastmeta_flags`, else set it |
-| `fmd_k_bit` (TX only) | `f.k_bit` | same; RX 0xff (no check) → leave `MTL_FASTMETA_RX_MATCH_K` unset, else set it |
+| `fmd_dit` (TX only) | `f.data_item_type` | same |
+| `fmd_k_bit` (TX only) | `f.k_bit` | same |
+| RX DIT / K filter: none since `88d47ac83` (the `st41_rx_ops` one went with st41) | `MTL_FASTMETA_RX_MATCH_DIT`, `_MATCH_K` in `f.fastmeta_flags` | set them to get a filter |
 
 ### 4.13 `st_api.h` address structs and ST 2110-10 helpers
 
@@ -925,15 +927,15 @@ deleted.
 | LB-03 | st20p TX | a converting session fires `notify_frame_done` at conversion, so the application's (ext) frame returns before transport done | `:388-393`, `:1004-1008` | keep | `ST_CORE_LEGACY_EARLY_RELEASE`: the notifier thread fires at the transform's done (XFORM → QUEUED) | frozen `St20p` convert cases; to add: UB `St20pLegacy.notify_at_convert` |
 | LB-04 | st20p TX | interlaced: `get_frame` presets `second_field`, alternating per call; the application may override it | `:821-823` | keep | wrapper | frozen `St20p.digest_1080i_s2` |
 | LB-05 | st20p TX, RX | `user_meta` is reset at `get_frame` (TX) and delivered with the frame (RX) | TX `:825-826`; RX `st20_pipeline_rx.c:931-937` | keep | wrapper (the meta area's `MTL_META_USER` record) | frozen `St20p.digest_user_meta_s2` |
-| LB-06 | st20p TX, RX | `BLOCK_GET` waits up to the block timeout (default 1 s, `st20p_*_set_block_timeout`) and returns NULL on timeout or teardown | TX `:782-798`, `:1143`; RX the same | keep | wrapper: the core's wait with that timeout (fixes SF-15, SF-16); `wake_block` is LB-14 | frozen `St20p.tx_put_frame_abort`; to add: UB `St20pLegacy.block_timeout` |
+| LB-06 | st20p TX, RX | `BLOCK_GET` waits up to the block timeout (default 1 s, `st20p_*_set_block_timeout`) and returns NULL on timeout or teardown | TX `:782-808`, `:1143`; RX the same (`_rx.c:861-917`) | keep | wrapper: the core's wait with that timeout (fixes SF-15; SF-16 fixed on main); `wake_block` is LB-14 | frozen `St20p.tx_put_frame_abort`; to add: UB `St20pLegacy.block_timeout` |
 | LB-07 | st20p TX, RX | the stat dump prints `TX_st20p(n), frame get try … succ … put … drop …` and resets those counters each dump; the acceptance parser reads it | TX `:688-694`; RX `st20_pipeline_rx.c:801-803` | keep | the compatibility log lines of `compat_log.c` (from stats-registry deltas), not the core | `application_base.py:424-436` regexes in a U test |
 | LB-08 | st20p TX | frame status names (`free`, `ready`, `in_converting`, …) in the dbg queue dump | `:11-18`, `:683` | change: the dump shows core states (a dbg line no parser reads) | — | none needed (dbg only) |
 | LB-09 | st20p RX | `frame->status` COMPLETE, RECONSTRUCTED, CORRUPTED, and CORRUPTED counted in the RX stats | `st20_pipeline_rx.c:940-941` | keep | wrapper (§2.2 status map) | T1 RX cases |
 | LB-10 | st20p RX | `get_frame` scans the ring from the consumer index, not in ready order | `st20_pipeline_rx.c:859-860`, `:927` | open: ring order or `pub_seq` order | — | to add: UB `St20pLegacy.rx_order` |
 | LB-11 | st20p TX, RX | the USDT probes `st20p_tx_frame_get`, `st20p_rx_frame_get` and the RX frame dump fire per frame | TX `:828`; RX `:942-951` | keep | wrapper | to add: a USDT smoke check in the nightly |
-| LB-12 | st30p, st40p | done-flag order differs from st20p's; st40p keeps the legacy codec, checks and RX parse (D-149) | `st30_pipeline_tx.c`, `st40_pipeline_tx.c` | rows added before MS4a's re-base | — | frozen `St30p*`, `St40p*` |
+| LB-12 | st30p, st40p | done-flag order differs from st20p's: st30p and st40p set it before FREE (`9b4a20595`), st20p after; st40p keeps the legacy codec, checks and RX parse (D-149) | `st30_pipeline_tx.c`, `st40_pipeline_tx.c` | rows added before MS4a's re-base | — | frozen `St30p*`, `St40p*` |
 | LB-13 | st22p | to be listed before MS4b's re-base | `st22_pipeline_tx.c`, `_rx.c` | rows added before MS4b | — | frozen `St22p*` |
-| LB-14 | st20p TX, RX | `wake_block` makes a blocked `get_frame` return NULL once | `st20_pipeline_tx.c:789-797` (SF-16, fixed on main, `0d05bbd40`) | keep | wrapper: `kick` and EVENT(s, ACQUIRE) | to add: UB `St20pLegacy.wake_block_once` |
+| LB-14 | st20p TX, RX | `wake_block` makes a blocked `get_frame` return NULL once | TX ends the blocked get, a wake with no waiter does nothing (`st20_pipeline_tx.c:787-793`, `:1362-1375`; SF-16 fixed, `0d05bbd40`); RX keeps a token until a get that waits spends it (`st20_pipeline_rx.c:29-35`, `:866-876`) | keep | wrapper: `kick` and EVENT(s, ACQUIRE) | to add: UB `St20pLegacy.wake_block_once` |
 
 "Open" rows are decided in task RB0 (implementation-plan.md §6.1) before the re-base code starts;
 a re-base commit that touches an open row is rejected.

@@ -625,10 +625,10 @@ unresolved.
   as today's engine does (`st_tx_audio_session.c:496`, `:530`; `st_rx_audio_session.c:510`).
 - **Audio.** `MTL_AM824` counts AES3 subframes in `channels`, two per AES3 signal, so an odd count
   is `-MTL_EINVAL` (ST 2110-31 §6.1). `MTL_PTIME_80US` is the ST 2110-31 0.08 packet time: 4 samples
-  at 48 kHz (8 at 96 kHz), a packet every 83⅓ µs (ST 2110-31 Table 1; the legacy engine sends one
-  every 80 µs, SF-35); an AM824 SDP writes the Table 1 strings, `0.12` for `MTL_PTIME_125US` and
-  `0.08`. `MTL_PCM8` (L8) sets `MTL_INFO_NON_COMPLIANT`: ST 2110-30 takes the AES67 formats L16 and
-  L24 *(inferred: AES67 not read)*.
+  at 48 kHz (8 at 96 kHz), a packet every 83⅓ µs (ST 2110-31 Table 1; the legacy engine sent one
+  every 80 µs until `7cbe505d5`, SF-35); an AM824 SDP writes the Table 1 strings, `0.12` for
+  `MTL_PTIME_125US` and `0.08`. `MTL_PCM8` (L8) sets `MTL_INFO_NON_COMPLIANT`: ST 2110-30 takes the
+  AES67 formats L16 and L24 *(inferred: AES67 not read)*.
 - **Fastmeta.** A unit goes out as data items of at most 359 words (1436 B), one per RTP packet,
   because a data item lies wholly inside one packet under the 1460 B Standard UDP Size Limit (ST
   2110-41 §5.4; the 9-bit length would allow 511 words); `used` 0 sends one RTP packet with no data

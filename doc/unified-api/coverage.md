@@ -367,11 +367,11 @@ because the pipeline ops and frame structs embed these types (§4).
 |---|---|---|---|---|
 | U-280 | TX one data item per frame: `ST40_TX_FLAG_FAST_METADATA` on a frame-level ST40 session (`st40_api.h:82-102`), `get_next_frame`, `st40_frame.data`/`data_size` (`meta[]` ignored), `st40_tx_get_framebuffer` | `sc.essence = MTL_FASTMETA`, `u.used` | MS4 | R; RXTX 1, KT 1, UT 3; S! |
 | U-281 | data item type and K bit: `st40_tx_ops.fmd_dit`, `fmd_k_bit` (TX only) | `f.data_item_type`, `f.k_bit` | MS4 | R; RXTX 4, KT 1, UT 2; S! |
-| U-282 | RX filter on DIT / K: none today; the `st41_rx_ops` filter (`0xffffffff` / `0xff` = off) went with st41 in `88d47ac83`, and ST40 RX in fast metadata mode has none | `MTL_FASTMETA_RX_MATCH_DIT`, `_MATCH_K` | MS4 | R; none in the library; RXTX 1 checks DIT and K itself (`rx_ancillary_app.c:128-131`). Unified, the filter changes with `MTL_UPDATE_MEDIA` in CREATED or STOPPED |
+| U-282 | RX filter on DIT / K: none today; the `st41_rx_ops` filter (`0xffffffff` / `0xff` = off) went with st41 in `88d47ac83`, and ST40 RX in fast metadata mode has none | `MTL_FASTMETA_RX_MATCH_DIT`, `_MATCH_K` | MS4 | new; none in the library; RXTX 1 checks DIT and K itself (`rx_ancillary_app.c:128-131`). Unified, the filter changes with `MTL_UPDATE_MEDIA` in CREATED or STOPPED |
 | U-283 | RX (RTP only today): `ST40_RX_FLAG_FAST_METADATA` on an `ST40_TYPE_RTP_LEVEL` session (`st40_api.h:158`), `notify_rtp_ready` + `st40_rx_get_mbuf`; frame level is rejected (`st_rx_ancillary_session.c:1506-1509`) | frame-level RX is new; the raw path is U-345 | MS4 | R; RXTX 1, KT 1, UT 3; S!. CHANGED |
 | U-284 | user pacing, timestamp: `ST40_TX_FLAG_USER_PACING/USER_TIMESTAMP` with `ST40_TX_FLAG_FAST_METADATA` | `sc.media_mode`, `MTL_SUBMIT_*` | MS6 | R; RXTX 1 (the ANC flags, `tx_ancillary_app.c:524`); S! |
 | U-285 | rate and interlace: `st40_tx_ops.fps`, `interlaced` (no F bits in fast metadata mode) | `f.video` (raster), `MTL_FASTMETA_FREE_RUNNING` | MS4 | R; RXTX; S! |
-| U-286 | stats, update, queue meta: the ST40 calls on a fast metadata session, `st40_*_get/reset_session_stats`, `st40_tx_update_destination`, `st40_rx_update_source`, `st40_rx_get_queue_meta` | stats keys, `mtl_session_update`; queue meta: U-139 | MS4 (stats; `mtl_session_update` with the st41 binding, `when` NULL; at an instant MS5) | R; none; S! |
+| U-286 | stats, update, queue meta: the ST40 calls on a fast metadata session, `st40_*_get/reset_session_stats`, `st40_tx_update_destination`, `st40_rx_update_source`, `st40_rx_get_queue_meta` | stats keys, `mtl_session_update`; queue meta: U-139 | MS4 (stats; `mtl_session_update` with the fastmeta binding, `when` NULL; at an instant MS5) | R; none; S! |
 
 ### 2.16 RTP passthrough (app-built packets)
 
@@ -481,7 +481,7 @@ this section is the inventory behind it.
 | the st30/st40 pipelines take `st_tx_port`/`st_rx_port` from `st_pipeline_api.h` (`st30_pipeline_api.h:114`, `:278`; `st40_pipeline_api.h:144`, `:232`), which drags in all of `st20_api.h`; st40p uses `st40_meta` (`:24`), `st40_tx_test_config` (`:159`) | the headers |
 | the plugin ABI uses `mtl_handle` (`st_plugin_create_fn`, `:89`), `st_frame_fmt`, `struct st_frame`, `st_plugin_device`, `st22_quality_mode`, 64-bit caps masks; the convert API uses pgroup structs, `st31_am824`/`st31_aes3`, `mtl_simd_level`, `mtl_udma_handle` | `st_pipeline_api.h:85-95`, `:676-836`; `st_convert_api.h:13`, `:44`, `:1064`; internal `:48` |
 | ecosystem pipeline users need session types: GStreamer `st20_rx_frame_meta` (`gst_mtl_st20p_rx.c:140`), `st30_calculate_framebuff_size` (`gst_mtl_st30p_rx.c:229`), st40 UDW/parity (`gst_mtl_st40p_tx.c:706-707`); FFmpeg `st30_calculate_framebuff_size` (`mtl_st30p_rx.c:126`) and the session flag `ST20_RX_FLAG_DMA_OFFLOAD` on st20p ops (`mtl_st20p_rx.c:176`, a misuse) | the plugins |
-| ABI hygiene: no `-fvisibility`, no version script, no export macro; 757 dynamic symbols, about 228 internal `mt_*`; soname plain `libmtl.so`; the Windows `.def` generated from every export; `ALLOW_EXPERIMENTAL_API` set for lib only | `lib/meson.build:95-97`, `:161-169`, `:132-133`, `:8` |
+| ABI hygiene: no `-fvisibility`, no version script, no export macro; 736 dynamic symbols, about 228 internal `mt_*`; soname plain `libmtl.so`; the Windows `.def` generated from every export; `ALLOW_EXPERIMENTAL_API` set for lib only | `lib/meson.build:95-97`, `:161-169`, `:132-133`, `:8` |
 | deprecation: `__mtl_deprecated_msg()` on fields only, never functions; a no-op under `__MTL_PYTHON_BUILD__`, silenced in the library by `__MTL_LIB_BUILD__` | `include/mtl_api.h:141-147`, `:746-760`; `meson.build:30` |
 | `lib/src` uses the installed headers through `st_header.h:9-14`; `mt_main.h:24-25` includes `mtl_sch_api.h`, `mt_sch.c:15` `mtl_lcore_shm_api.h`; include path `include_directories('.', 'include')`, so moving the files needs one include-path change and no source edit | `lib/src/st2110/st_header.h`, `meson.build:57` |
 | the pipelines create sessions through the session API, which therefore stays the internal engine | `st20_pipeline_tx.c:490`, `:972`; `st20_pipeline_rx.c:601`, `st22_pipeline_tx.c:557`, `st30_pipeline_tx.c:310`, `st40_pipeline_rx.c:188` |
@@ -639,7 +639,7 @@ in-tree consumer beyond tests, a sample or RxTxApp.
 | CUT-6 | `ST22_TX/RX_FLAG_DISABLE_BOXES`, `ST22P_TX/RX_FLAG_DISABLE_BOXES` | U-234 | no consumer | none |
 | CUT-7 | RTCP flags on ST30, ST40 (fast metadata included) and st40p | U-142 | no effect in `lib/` | none (video and cvideo keep NACK) |
 | CUT-8 | `st_draw_logo`, `mtl_memcpy`, `mtl_sleep_us`, `mtl_delay_us`, `mtl_thread_setname`, `mtl_get_if_ip`, `mtl_udma_fill` | U-071, U-073, U-101, U-115, U-369, U-416 | thin wrappers, zero or one consumer outside samples | sample code, libc, `mtl_unit_copy_in/out` |
-| CUT-9 | queue meta (`*_rx_get_queue_meta`, `st_queue_meta`) and `*_RX_FLAG_DATA_PATH_ONLY` | U-139 | KT only; a suspected NULL dereference on non-socket backends (SP-02) | none |
+| CUT-9 | queue meta (`*_rx_get_queue_meta`, `st_queue_meta`) and `*_RX_FLAG_DATA_PATH_ONLY` | U-139 | KT only; its NULL flow dereference (SP-02) is fixed on main, `8afeaa6fc` | none |
 | CUT-10 | user schedulers and tasklets (`mtl_sch_*`, `mtl_tasklet_ops`) | U-068, U-069 | one KT file (`sch_test.cpp`) | none |
 | CUT-11 | dead fields: `tx/rx_sessions_cnt_max`, `sample_size`, `sample_num`, the RX `sip_addr` alias, RX `pacing`/`packing`, `MTL_FLAG_BIND_NUMA`, ST40P `FORCE_NUMA`, `st40p_rx_ops.rtp_ring_size`, the UDP transport remnants | U-032, U-089, U-256, U-271, U-272, U-411, U-412, U-415 | documented as unused, or no effect | none |
 | CUT-12 | the DPDK AF_XDP and AF_PACKET PMD backends (`dpdk_af_xdp:`, `dpdk_af_packet:`) | U-095 | native AF_XDP and kernel sockets cover them; such a port name fails `mtl_instance_open` with `-MTL_ENOTSUP` (`BACKEND_REMOVED`), and the detail names the replacement | `native_af_xdp:`, `kernel:` |
@@ -666,7 +666,7 @@ at `545a266a`). Pipeline flag bits are not aligned with session bits (`ENABLE_RT
 | drop when late | pipelines only | `MTL_OPT_LATE_POLICY` everywhere |
 | session stats | absent on ST22, st22p | one schema, ST22 included |
 | RTCP | ST20, ST22 (st20p, st22p); no effect on ST30/40 | NACK for video and cvideo; CUT-7 |
-| per-session pacing engine | ST30 and st30p only (video inherits the port's; ST22 always TSC, `st_tx_video_session.c:3414-3416`, `:3430-3432`) | `MTL_OPT_PACING` per session |
+| per-session pacing engine | ST30 and st30p only (video inherits the port's; ST22 always TSC, `st_tx_video_session.c:3448`, `:3449-3452`) | `MTL_OPT_PACING` per session |
 | zero-copy TX | partial; ST22 always copies; st20p derive only | reported per unit (`MTL_TXR_COPIED`, `MTL_INFO_DIRECT`) |
 | app memory TX | ST20 session, st20p, st22p | attached pools for every essence |
 | incomplete delivery | a flag on ST20, ST22, ST30 and the pipelines; ST40 always | `MTL_OPT_RX_INCOMPLETE` everywhere |
@@ -687,7 +687,7 @@ These tables are the index an implementer works from; [implementation-plan.md](i
 §2.3 links them. The home of a feature's milestone is its U-row (§2, D-137): where a table here
 and a U-row disagree, the U-row is right.
 
-**Today's surfaces** ([legacy-internals.md](legacy-internals.md)): five media families × two
+**Today's surfaces** ([legacy-internals.md](legacy-internals.md)): four media families × two
 directions × up to three units of work × two layers, plus `st20rc`:
 
 | Today | Unified home | When |
@@ -754,7 +754,7 @@ directions × up to three units of work × two layers, plus `st20rc`:
 | 7 | split-forward (4K → 4 × 1080p tiles) | pool region + attach + `unit.hold` (ex12) | MS2b |
 | 8 | RX dedicated and dynamic ext frames | `MTL_SESSION_POOL_ATTACHED`, `MTL_SESSION_RX_BY_INDEX`; `mtl_rx_provide` | MS2b |
 | 9 | GPU VRAM RX frames | `mtl_mem_open` with `MTL_MEM_DEVICE` (`-MTL_ENOTSUP` until then) | MS6 |
-| 10 | `DATA_PATH_ONLY`, queue meta (suspected NULL dereference, SP-02) | none: removed (D-112) | — |
+| 10 | `DATA_PATH_ONLY`, queue meta (SP-02, fixed on main, `8afeaa6fc`) | none: removed (D-112) | — |
 | 11 | exact user pacing, user pacing, normal | `MTL_SUBMIT_EXACT`, `MTL_MEDIA_TAI` + `MTL_SUBMIT_NOT_BEFORE`, `MTL_MEDIA_AUTO` | video: user pacing and normal MS1, exact B3 (else MS2a); ST40 MS6 |
 | 12 | epoch RTP and `rtp_timestamp_delta_us` | the default; `tx.rtp_trim_ns` | MS1; `tx.rtp_trim_ns` MS3 |
 | 13 | `DISABLE_BULK`, `TSC_NARROW`, `STATIC_PAD_P`, `start_vrx`, `pad_interval` | `MTL_OPT_VIDEO_*`, `MTL_OPT_PACING` | MS1 |

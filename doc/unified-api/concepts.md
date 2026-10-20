@@ -43,7 +43,7 @@ Three questions a user of MTL should be able to answer, and today cannot:
 
 MTL's engines (packet builders, pacing, reassembly, ST 2022-7 merge) are sound. The API around
 them leaves users unable to answer basic questions, and leaves maintainers four exchange models,
-twelve metadata structs and no ABI versioning to carry. Each point below is a fact of today's code
+eleven metadata structs and no ABI versioning to carry. Each point below is a fact of today's code
 ([legacy-internals.md](legacy-internals.md)).
 
 | Area | Today | Unified API |

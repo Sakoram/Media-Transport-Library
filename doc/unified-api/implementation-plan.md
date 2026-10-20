@@ -223,7 +223,7 @@ OI-60):
 
 ### 3.2 Code that must land first
 
-- **PR #1770** (open, 38 commits): of its rows MS1 needs SF-05/MF1 (an ext buffer was reported done
+- **PR #1770** (merged on main, 2026-10-07): of its rows MS1 needs SF-05/MF1 (an ext buffer was reported done
   before its `refcnt` was decremented, `tv_frame_free_cb`; fixed on main, `8c9d48f3e`, which
   decrements and clears before notifying, `st_tx_video_session.c:144-155`), SF-08,
   SF-09 and SF-23. If it is not merged by the end of week 1, the MF1 hunk is taken into task E1a. The
@@ -1501,7 +1501,7 @@ about 60 + 120 lines to C1q1 and C1q2 together.
 - **Converter plugins:** on the transform claim and done (D-100).
 - **The st20p re-base on the core:** last, after the nightly comparison has burned in: `get_frame`
   = acquire seen as `st_frame`; `put_frame`/`put_ext_frame` = submit; `put_frame_abort` = release;
-  `BLOCK_GET` = the core's wait (fixes SF-15, SF-16); one notifier thread of the instance, on an
+  `BLOCK_GET` = the core's wait (fixes SF-15; keeps SF-16's fix, LB-14); one notifier thread of the instance, on an
   internal queue, calls the legacy notifier once per published unit (`pub_seq`), exactly once (R2).
   Auto-detect, user meta, timing-parser meta and drop-when-late live in the video bindings. Safety
   net: the 44 `St20p` cases, the pipeline unit tests and T1's parity tests. Its tasks are below,
@@ -1759,8 +1759,8 @@ A row without an engine.md §6 ID names its fix.
 | E2 | wire-visible (±1 tick at 1001 rates; legacy opt-in) | X, else MS3 | — |
 
 Not on the MS1 path, because the core avoids them by design: SF-13 (stats getter from a
-callback), SF-15 and SF-16 (the pipeline's `BLOCK_GET` mutex and `wake_block`; the core waits on
-its own wait targets, and the legacy pipelines get the fix when they are re-based), SF-14
+callback), SF-15 (the pipeline's `BLOCK_GET` mutex; the core waits on its own wait targets, and
+the legacy pipelines get the fix when they are re-based; SF-16 is fixed on main, `0d05bbd40`), SF-14
 (`update_destination` under the spinlock; MS3 (G1) for video, MS4 for the others).
 
 ## 8. Test plan and guarantees

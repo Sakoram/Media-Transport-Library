@@ -153,7 +153,7 @@ filters, and hands out XSK map descriptors. At `545a266a` **[verified]** unless 
 
 - the socket `/var/run/imtl/mtl_manager.sock` (`manager/mtl_mproto.h:16`, no override) is mode `0666`
   ("Allow all users to connect (which might be insecure)", `manager/mtl_manager.cpp:112-122`;
-  `0777` until `04138ad2c`);
+  `0777` until `04138ad2c`); its directory is `0755` and loses others' write (`:50-70`, `173c36cba`);
 - a client's identity is the PID and UID it writes in its own register message (`mt_instance.c:213-214`,
   read at `manager/mtl_instance.hpp:191-213`); there is no `SO_PEERCRED`;
 - so any local user can get an interface's XSK map descriptor over `SCM_RIGHTS`
@@ -686,9 +686,9 @@ into pods, it must be (EK5):
   reconciles; it deletes only rules in its own range, takes a single-instance lock before unlinking the
   socket, handles SIGTERM and ignores SIGPIPE.
 
-The library uses `MSG_NOSIGNAL` and a per-request timeout (EK4; open PR #1770 covers part). On manager
-loss it posts `MTL_EVENT_MANAGER_LOST`, sets health `MANAGER_LOST` and never blocks; it closes its
-connection only after its schedulers and sockets stopped (§4.2 step 5).
+The library uses `MSG_NOSIGNAL` and a per-request timeout (EK4; main has the `MSG_NOSIGNAL` part,
+`d65ecb135`). On manager loss it posts `MTL_EVENT_MANAGER_LOST`, sets health `MANAGER_LOST` and
+never blocks; it closes its connection only after its schedulers and sockets stopped (§4.2 step 5).
 
 ### 4.13 AF_XDP in pods
 
@@ -819,7 +819,7 @@ What the audit found, with the engine fix that removes it ([engine.md](engine.md
 | 2–3 | opt-in phc2sys steers the node's `CLOCK_REALTIME` (`ADJ_SETOFFSET`, `ADJ_FREQUENCY`, `ADJ_TICK`) and never restores it; the PTP client leaves its frequency offset on a shared PF PHC | `mt_ptp.c:163-240`, `:358-390` | EK10 |
 | 4 | MtlManager resolves a pod's ifindex in its own namespace | [engine.md §7.3](engine.md#73-pod-hazards-h-k) | EK5 |
 | 5 | manager restart: no reconnect, live rules wiped | [engine.md §7.3](engine.md#73-pod-hazards-h-k) | EK5 |
-| 6–7, 24 | manager: only SIGINT handled, so SIGTERM killed it without cleanup (fixed on main, `b10015803`); socket `0666` (`0777` until `04138ad2c`), identity self-reported; a second manager unlinks the live socket | `manager/mtl_manager.cpp:72-77`, `:101`, `:112-122`; `manager/mtl_instance.hpp:191-213` | EK5 |
+| 6–7, 24 | manager: only SIGINT handled, so SIGTERM killed it without cleanup (fixed on main, `b10015803`); socket `0666` (`0777` until `04138ad2c`), identity self-reported; a second manager unlinks the live socket, and since `2453c05d8` the first's exit unlinks the new one **[inferred]** | `manager/mtl_manager.cpp:72-77`, `:101`, `:112-122`, `:241`; `manager/mtl_instance.hpp:191-213` | EK5 |
 | 8 | library manager I/O: no timeout (`MSG_NOSIGNAL` since `d65ecb135`); a missing manager silently selects the shm allocator | `mt_instance.c:17`, `:24`, `:69`, `:91`; `mt_main.c:484` | EK4 |
 | 9 | CPU allocators keyed by remapped lcore ID (`--remap-lcore-ids`), not CPU | `manager/mtl_lcore.hpp:11-55`; `mt_sch.c:742-758`; `dev/mt_dev.c:443-446` | EK6 |
 | 10 | SysV lcore table (`ftok("/dev/null", 21)`, `/tmp/kahawai_lcore.lock`) with `kill(pid, 0)` and hostname checks; the clean tool clears nothing | `mt_sch.c:503-523`, `:548-554`, `:683-697`, `:1292-1317`; `mt_platform.h:57` | EK6 |
@@ -830,7 +830,7 @@ What the audit found, with the engine fix that removes it ([engine.md](engine.md
 | 15 | st20p TX free waits up to about 1 s per held frame; 16 sessions × 3 frames ≈ 48 s **[inferred]** | `st2110/pipeline/st20_pipeline_tx.c:730-761` | EK1 |
 | 16 | no SIGTERM path | [engine.md §7.3](engine.md#73-pod-hazards-h-k) | ex16 recipe |
 | 17 | `mt_mcast_uinit` frees the group list without leaves; no gratuitous ARP at start | `mt_mcast.c:527-559`, leaves only at `:735-743` | EK9 |
-| 18 | VF rate-limit state in the PF stays until a VF reset | `patches/ice_drv/2.6.7/0001-*.patch` | EK16 |
+| 18 | VF rate-limit state in the PF stays until a VF reset after a SIGKILL; a clean uninit of an iavf port with the RL hierarchy resets its TX queues to the link rate (`46d4b0c36`), and a TSC init clears kept rates when built against DPDK ≥ 26.07.91 (`41d9f31a5`) | `patches/ice_drv/2.6.7/0001-*.patch`; `dev/mt_dev.c:2184-2187`, `:1569-1613` | EK16 |
 | 19 | AF_XDP `tx_maxrate` left on the queue; UDP filter refcounts per interface, not per client | `dev/mt_af_xdp.c:867-892`; `manager/mtl_instance.hpp:272-287` | EK5 |
 | 20 | open blocks: link 30 s (the header comment's 90 s is wrong), ARP 60 s, PTP 180 s; `mtl_init` cannot be retried in-process | `dev/mt_dev.c:845-880`, `:500-503`; `mt_arp.c:171-203`; `st2110/st_tx_video_session.c:391-393` | EK18 |
 | 21 | no heartbeat; the stat thread reads and resets counters without a lock | `mt_sch.c:160`, `:460-482` | EK11 |

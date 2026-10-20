@@ -66,7 +66,7 @@ flowchart TB
         BIND["engine bindings: video,<br/>cvideo, audio, anc,<br/>fastmeta, packet"]
         NB["null binding<br/>(no engine)"]
         LS["legacy session API st2x_*<br/>(deprecated at MS7,<br/>internal from F+2)"]
-        ENG["engines: tv_* / rv_* builders,<br/>transmitters, reassembly;<br/>audio, ANC, fastmeta sessions"]
+        ENG["engines: tv_* / rv_* builders,<br/>transmitters, reassembly;<br/>audio, ANC sessions<br/>(fastmeta in ANC)"]
         DP["datapath and backends:<br/>DPDK PMD, AF_XDP, kernel socket"]
     end
     SH --> CORE
@@ -1253,9 +1253,9 @@ sequenceDiagram
 
 - Packets already in rings and descriptors carry the old header, so the ack reports the first
   media index sent to the new destination (this matches IS-05 scheduled activation).
-- (MS5) The kernel-socket backend sends GSO to `t->send_addr`, fixed at queue creation
-  (`datapath/mt_dp_socket.c:241`, SF-36): a worker creates a new queue and it is swapped at the
-  boundary. The RTCP TX header copied from `s_hdr` at init (`st_tx_video_session.c:1040-1042`)
+- (MS5) The kernel-socket backend sent GSO to `t->send_addr`, fixed at queue creation (SF-36);
+  since `8224aba52` it sends each packet to its header's destination (`datapath/mt_dp_socket.c:75`,
+  `:124-127`, `:152`). A worker creates a new queue and it is swapped at the boundary. The RTCP TX header copied from `s_hdr` at init (`st_tx_video_session.c:1040-1042`)
   is updated too (SF-37).
 - RX: the new flow rule joins the same queue before the old one is removed. With `MTL_AT_TAI t`
   the old rules accept only units whose media time is before t and the new ones only units at or

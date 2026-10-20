@@ -23,7 +23,7 @@ release stage comes.
 ## 1. Today
 
 There is no ABI promise. `libmtl.so` has no soname version (`lib/meson.build:161-169`: no
-`soversion`, `version`, `gnu_symbol_visibility` or version script) and exports everything: 757
+`soversion`, `version`, `gnu_symbol_visibility` or version script) and exports everything: 736
 dynamic function symbols, 235 of them internal (`mt_*`, `tv_*`, `rv_*`). `ops` structs are copied
 with the library's `sizeof` and have no reserved fields, so silent breaks have shipped
 (`rl_burst_size` added inside `port_params[]` moved every later field). There are about 30 exported
@@ -266,7 +266,7 @@ flowchart LR
 | Tier | Headers | Installed | Version nodes | Users |
 |---|---|---|---|---|
 | public | `mtl/experimental/mtl.h` and its optional headers (later `mtl/`) | always; pkg-config `mtl` | `MTL_UNIFIED_EXPERIMENTAL_<rev>_MSn`, then `MTL_1.0` | everyone |
-| legacy | today's headers and `mtl_build_config.h`, moved unchanged to `mtl/legacy/` | until F+2; pkg-config `mtl-legacy` adds `-I` and `-DMTL_LEGACY_API=1` | `MTL_LEGACY` (from MS3): `mtl_api.h`, `mtl_sch_*`, the pipelines (`st2xp_*`, `st_frame_*`, plugin ABI v1) and the sessions (`st20_` … `st41_`, `st20rc_`, `st10_*`, per-pair converters) | migrating and in-tree legacy code |
+| legacy | today's headers and `mtl_build_config.h`, moved unchanged to `mtl/legacy/` | until F+2; pkg-config `mtl-legacy` adds `-I` and `-DMTL_LEGACY_API=1` | `MTL_LEGACY` (from MS3): `mtl_api.h`, `mtl_sch_*`, the pipelines (`st2xp_*`, `st_frame_*`, plugin ABI v1) and the sessions (`st20_` … `st40_`, `st20rc_`, `st10_*`, per-pair converters) | migrating and in-tree legacy code |
 | internal | `lib/include/mtl_internal/`: the session declarations from F+2 | never | none: `local: *`; an `error` attribute unless `MTL_ALLOW_INTERNAL_API` (as DPDK's `__rte_internal`) | the engines, the core's bindings, in-tree tests and tools |
 
 The install layout during the transition puts each tier in its own directory:

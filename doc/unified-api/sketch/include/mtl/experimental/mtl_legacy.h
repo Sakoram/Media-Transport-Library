@@ -55,7 +55,7 @@ MTL_API_CP(1) int mtl_instance_from_legacy(struct mtl_main_impl* legacy, mtl_ins
    so interlaced halves it (ST_FPS_P59_94 + interlaced is 30000/1001, 1080i59.94). Returns
    0, or -MTL_EINVAL for a value of ST_FPS_MAX or above and for interlaced ST_FPS_P100,
    P119_88 and P120, whose frame rates exceed 30 (FIELD_RATE, mtl.h). Use it for every
-   legacy ops struct with fps (st20, st22, st40, st41 and their pipelines). AS. */
+   legacy ops struct with fps (st20, st22, st40 and their pipelines). AS. */
 static inline int mtl_raster_from_legacy(uint32_t st_fps, int interlaced,
                                          struct mtl_raster* r) {
   struct mtl_rational f;
@@ -128,7 +128,7 @@ static inline int mtl_ptime_from_legacy(uint32_t st30_ptime, uint32_t* out) {
   *out = st30_ptime + 1u;
   return 0;
 }
-/* enum st20_type, st22_type, st30_type, st40_type, st41_type to enum mtl_unit_kind, a table:
+/* enum st20_type, st22_type, st30_type, st40_type to enum mtl_unit_kind, a table:
    FRAME_LEVEL (0) to MTL_UNIT_FRAME, RTP_LEVEL (1) to MTL_UNIT_PACKETS, ST20_TYPE_SLICE_LEVEL
    (2) to MTL_UNIT_ROWS. */
 static inline int mtl_unit_kind_from_legacy(uint32_t st_type, uint32_t* out) {

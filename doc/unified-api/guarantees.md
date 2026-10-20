@@ -159,7 +159,7 @@ budgets [§8.4](implementation-plan.md#84-performance-budgets), test isolation
 - **G-30** U; MS1. Stop and close wake blocked calls with `-MTL_ESHUTDOWN`, interrupt with
   `-MTL_ECANCELED`, ERROR with `-MTL_EIO`. Test: blocked acquire, dequeue and reap (event reads from
   MS3) return within a bound with the documented code on stop, interrupt, close and ERROR; WH11.
-  Today `wake_block` does not return early (SF-16; fixed in open PR #1770).
+  Before `0d05bbd40` the TX `wake_block` did not return early (SF-16, fixed on main).
 - **G-31** U, UB; MS1 (discard MS2a). Discard, DRAIN and FLUSH leave every accepted unit with a
   terminal outcome. Test: discard, DRAIN and FLUSH with units at every stage; stop racing submit.
 - **G-32** U, I; MS1. A failed create leaves no session, flow, quota or handle. Test: inject a

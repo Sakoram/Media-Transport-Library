@@ -781,7 +781,8 @@ the interrupt pair joins MS2a's weak-memory item.
 
 Until `0d05bbd40` a TX `*_wake_block()` did not make `get_frame` return early: the predicate loop
 slept again until the deadline (SF-16), so shutdown took up to the 1 s block timeout. Today the
-wait ends when the count of `wake_block` calls moved (`st20_pipeline_tx.c:787-797`). From the
-MS2b re-base `wake_block` increments the wrapper's `kick` and runs EVENT(s, ACQUIRE), and the
-legacy wait's T3 also returns when `kick` moved, so a blocked `get_frame` returns NULL once
-(migration.md §6.5, LB-14).
+TX wait ends when the count of `wake_block` calls moved (`st20_pipeline_tx.c:787-797`); on RX
+`wake_block` sets a token that the next get that waits spends (`st20_pipeline_rx.c:29-35`,
+`:866-876`). From the MS2b re-base `wake_block` increments the wrapper's `kick` and runs
+EVENT(s, ACQUIRE), and the legacy wait's T3 also returns when `kick` moved, so a blocked
+`get_frame` returns NULL once (migration.md §6.5, LB-14).

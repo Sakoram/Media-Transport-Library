@@ -417,7 +417,7 @@ are offered (TX, RX, the RX timing parser).
   48 at 1 ms / 48 kHz, 96 at 1 ms / 96 kHz, 6 at 125 µs / 48 kHz, 12 at 125 µs / 96 kHz, 16 at 333⅓ µs / 48 kHz.
   Every level's channel cap keeps an L24 payload at 1152 B (48 × 8 × 3, 6 × 64 × 3, 96 × 4 × 3, 12 × 32 × 3), a
   1172 B UDP datagram *(inferred)*. MTL's table and its 44.1 kHz and 80 µs cases are
-  [timing.md §8](timing.md#8-audio); the 80 µs case is a defect (§15).
+  [timing.md §8](timing.md#8-audio); the 80 µs case was a defect (§15), fixed on main, `7cbe505d5`.
 - AES67 §7.5 *(inferred, secondary)*: receivers buffer at least 3 × ptime, recommended 20 × ptime (or 20 ms if smaller);
   sender jitter below 17 packet times (or 17 ms), recommended ≤ 1 packet time. AES67 ptimes: 125 µs, 250 µs, 333⅓ µs,
   1 ms (required), 4 ms. -10 §7.7.1 takes the RTP increment per packet from AES67 §7.2.
@@ -476,8 +476,8 @@ Receiver capacity per level (-31 §7 Table 3), as AES3 subframe sequences (AES3 
 - Every Table 3 maximum fits the Standard UDP Size Limit with 4-byte subframes: 6 × 60 × 4 = 1440 B (+ 12 B RTP + 8 B
   UDP = 1460 B, the limit exactly), 4 × 80 × 4 = 1280 B, 48 × 6 × 4 = 1152 B, 96 × 2 × 4 = 768 B (4 sequences would be
   1536 B) *(inferred)*.
-- The 0.08 ms packet carries 4 (48 kHz) or 8 (96 kHz) samples; the 80 µs packet period MTL uses today is the §15 defect,
-  not a -31 value. A -31 SDP writes the Table 1 string (`0.12`), not `0.125`.
+- The 0.08 ms packet carries 4 (48 kHz) or 8 (96 kHz) samples; the 80 µs packet period MTL used until `7cbe505d5` was
+  the §15 defect, not a -31 value. A -31 SDP writes the Table 1 string (`0.12`), not `0.125`.
 - AM824 is 32 bits per subframe whatever the PCM depth, so `channels` × 4 B × S is the payload; with nchan odd the
   stream is not -31.
 - Annex A (informative): from AES10 (MADI) sources, B may occur with F = 0 and F has the reverse sense; a resilient
@@ -578,7 +578,8 @@ protected-code-safe by construction; raw 10-bit UDWs need the §9.1 check *(infe
 
 - **Size.** The 9-bit length allows 511 content words, but a package must fit one packet: at the Standard UDP Size Limit
   one package carries at most (1460 − 8 − 12 − 4) / 4 = **359 words (1436 B)**, which is what MTL's legacy TX allows
-  (`max_pkt_len`, `st_tx_ancillary_session.c:1803-1805`). Bigger objects need several packages (Annex A or the item's own
+  at frame level (`max_pkt_len`, `st_tx_ancillary_session.c:1803-1805`; at RTP level `MTL_PKT_MAX_RTP_BYTES` leaves
+  1336 B, `include/st40_api.h:98-99`). Bigger objects need several packages (Annex A or the item's own
   method) *(inferred)*.
 - **Bursts.** With RNOMINAL below 172 800 packets/s, CMAX = 4, and below 727 packets/s the drain is 800/s: a sender may
   put at most about 4 packets back to back, then one per 1.25 ms *(inferred)*. There is no frame-relative window as in
@@ -974,7 +975,7 @@ rules; these are the numbers to check them against).
 | RTP unwrap window | ±6.628 h at 90 kHz, ±12.43 h at 48 kHz, ±6.21 h at 96 kHz, ±13.53 h at 44.1 kHz |
 | second field, 29.97i, frames 0–3 | RTP 1501, 4504, 7507, 10510 on the epoch grid (both formulas agree there; they diverge for an off-grid T0) |
 | launch delay L = 1 at 1080p59.94, type N | first packet ≈ M + 17.30 ms (RL, VRX0 = 5); EBU LIST then reports an RTP offset of −1501/−1502 ticks against a `[−1, 59]` window and a latency of 17.3 ms against `[0, 1 ms]`: legal for a camera ("unless justified"), not for playback with L ≥ 2 ([timing.md §5.2](timing.md#52-min_tx_delay_ns-and-the-launch-rule)) |
-| ST 2110-31 `ptime` 0.08 | 4 samples at 48 kHz (8 at 96 kHz) = 83⅓ µs, 12 000 packets/s; MTL's 80 µs period sends 4 samples per 80 µs, a 50 kHz rate (+4.17 %, about 41.7 ms per second against PTP; SF-35) |
+| ST 2110-31 `ptime` 0.08 | 4 samples at 48 kHz (8 at 96 kHz) = 83⅓ µs, 12 000 packets/s; MTL's 80 µs period sent 4 samples per 80 µs until `7cbe505d5`, a 50 kHz rate (+4.17 %, about 41.7 ms per second against PTP; SF-35) |
 | audio payload at the level limits | L24: 48 × 8 × 3 = 6 × 64 × 3 = 96 × 4 × 3 = 12 × 32 × 3 = 1152 B (1172 B UDP); AM824: 6 × 60 × 4 = 12 × 30 × 4 = 1440 B (1460 B UDP, the limit), 4 × 80 × 4 = 1280 B, 96 × 2 × 4 = 768 B |
 | fastmeta package size | at most 359 content words (1436 B) per package at the Standard UDP Size Limit, although the 9-bit length allows 511; CMAX = 4 and TDRAIN = 1.25 ms for any stream below 727 packets/s |
 | ST 2022-6 packets per frame | 4497 at 1080i29.97 and 1080p59.94, 5397 at 1080i25 and 1080p50, 2249 / 2699 at 720p59.94 / 720p50, 5621 at 1080p23.98, 819 / 982 at 525i / 625i (§11) |

@@ -52,7 +52,7 @@ an MTL tasklet.
 |---|---|---|
 | H1 | almost every user callback (`get_next_frame`, `notify_*`, `query_ext_frame`, `uframe_pg_callback`, `notify_detected`) runs on the tasklet with the session spinlock held; `get_next_frame` is polled every iteration while idle | `st_tx_video_session.c:2699`, `st_rx_video_session.c:3644` **[verified at HEAD]**; `st_video_transmitter.c:674` |
 | H2 | a same-session stats getter called from a callback spins forever on the non-recursive spinlock | `st_tx_video_session.c:4782`, `st20_pipeline_tx.c:1320` (SF-13) |
-| H3 | BLOCK_GET: the tasklet does `pthread_mutex_lock` + `pthread_cond_signal` on every frame event; the application holds that mutex while scanning, so the pinned core can sleep in `FUTEX_WAIT` | `st20_pipeline_tx.c:41-46` in `tx_st20p_notify_frame_available` **[verified at HEAD]**; `:782-798`; same in every `st*p` (SF-15) |
+| H3 | BLOCK_GET: the tasklet does `pthread_mutex_lock` + `pthread_cond_signal` on every frame event; the application holds that mutex while scanning, so the pinned core can sleep in `FUTEX_WAIT` | `st20_pipeline_tx.c:41-46` in `tx_st20p_notify_frame_available` **[verified at HEAD]**; `:782-798`; same in every `st*p` (SF-15), RX scanning under it since `1a89339c4` (`st20_pipeline_rx.c:865-877`) |
 | H4 | TX-hang recovery runs on the transmitter: queue re-acquire under a pthread mutex, mempool re-create, busy flush, INFO logs | `st_video_transmitter.c:681` → `st_tx_video_session.c:4250-4351` **[verified at HEAD]**; audio `st_tx_audio_session.c:2741-2752` |
 | H5 | RX auto-detect allocates on the tasklet (legacy only from MS3) | `rv_init_sw` `st_rx_video_session.c:2668`, `rx_st20p_notify_detected` `st20_pipeline_rx.c:343-395` |
 | H6 | `update_destination` and `update_source` hold the session spinlock across ARP, flow and IGMP work ([§2.17](#217-updates-on-a-running-session-today)); the unified path fixes it in G1 (MS3) | [§2.17](#217-updates-on-a-running-session-today) (SF-14) |
@@ -517,7 +517,7 @@ MS2.
 | `rx_st20p_query_ext_frame` `:300-331` | user callback on the tasklet | the binding implements it from MS1 (one RX path, D-126): it hands the engine a core-allocated slot for every unit, any FREE one in MS1; MS2 adds attached pools and `RX_LATEST`, MS2b by index (`RX_BY_INDEX`); no user code runs there; per-unit provide is `mtl_rx_provide` (`mtl_mem.h`), exported in MS2 |
 | `rx_st20p_notify_detected` `:343-395` | logs and allocates on the tasklet (H5) | the binding's `notify_detected` records the format and returns; the re-init runs on a worker (MS6, with recovery) |
 | `ST20P_RX_FLAG_PKT_CONVERT` `:525-538` | installs `uframe_pg_callback = rx_st20p_packet_convert` with `uframe_size`: library code per packet on the tasklet, 4:2:2 10-bit to four formats; it disables DMA (`st_rx_video_session.c:2676-2677`) **[verified at HEAD]** | the binding installs it for `MTL_OPT_RX_CONVERT_PER_PACKET` (MS1); only the public `uframe_pg_callback` is cut |
-| `rx_st20p_block_wake` `:34-40` | mutex + cond on the tasklet (H3) | as TX: one `mt_wake()` |
+| `rx_st20p_notify_frame_available` `:37-48` | mutex + cond on the tasklet (`:42-47`, H3), no token since `1a89339c4`; `rx_st20p_block_wake` `:29-35` serves only `wake_block` and destroy, a broadcast (`23c524700`) | as TX: one `mt_wake()` |
 
 **The RX binding's `query_ext_frame`** (the `rx_st20p_query_ext_frame` row) also does:
 
@@ -597,7 +597,7 @@ The EK rows of this table land in MS3, E9 in MS6 (§6).
    the status half of SF-12 (the recovery verdict) (MS1, tasks E1a, E1c and E1d); SF-38 (closed by the TX binding,
    §2.2); SF-39 (closed by the completion CAS, [core.md](core.md) §4.2); SF-69 with PE6 (MS1: the RX reorder counter
    the MS1 stats expose); SP-01 (MS1: ordering in the bridge; MS3: the fix); SF-12's worker (R1,
-   MS6); SF-56 (EK2, MS3); SF-14 (G1: MS3 video, MS4 the others). Most of SF-05, SF-08, SF-16 and SF-36 are in PR #1770.
+   MS6); SF-56 (EK2, MS3); SF-14 (G1: MS3 video, MS4 the others). SF-05 (the order only), SF-08, SF-16 and SF-36 are fixed on main (`8c9d48f3e`, `fb13bf68a`, `0d05bbd40`, `8224aba52`).
 
 ### 2.8 Placement and quota today
 
@@ -900,10 +900,10 @@ the command mechanism is [core.md](core.md) §5.
 |---|---|---|---|
 | TX destination, `tv_mgr_update_dst` (`st_tx_video_session.c:3862-3881`) | `update_destination` holds the session spinlock across `tv_update_dst` and its ARP wait of up to 60 s (H6, SF-14) **[verified at HEAD]** | `st_tx_video_session.c:3867-3874`, `mt_arp.c:171-199` | MS3 (G1a, D-236): the CP builds the changed legs' templates, ARP in the call; the builder swaps them at `WAIT_FRAME` (D-103) |
 | RX source, `rv_update_src` | `update_source` holds the spinlock across flow and IGMP work (H6, SF-14) | `st_rx_video_session.c:4064-4122` | boundary command (MS3, G1b, D-236): a key-changed leg adds its new rule beside the old one, a key-same leg moves its source list; joins before leaves (in the CP call until MS5); every changed leg switches at one instant ([core.md](core.md) §5.4) |
-| kernel-socket backend | the destination is fixed at queue creation, so an update swaps the queue; `update_destination` does not redirect GSO (SF-36, #1770) | `datapath/mt_dp_socket.c:241`, `:153` | the queue swap ([core.md](core.md) §5, MS5; before it a running update is `-MTL_ENOTSUP`) |
+| kernel-socket backend | every packet, GSO or single, goes to its header's destination, so `update_destination` redirects it (SF-36, fixed on main, `8224aba52`); the queue's `send_addr` is only a cache | `datapath/mt_dp_socket.c:75`, `:124-127`, `:152-153` | the queue swap ([core.md](core.md) §5, MS5; before it a running update is `-MTL_ENOTSUP`) |
 | RTCP | `update_destination` leaves the RTCP TX header stale (SF-37) | `st_tx_video_session.c:1040-1042` | [core.md](core.md) §5, MS5 |
 | RTP sequence | no `ops` field carries an RTP sequence seed | — | OI-62's open choice: a seed in `st_engine_core.h` (§2.11), so that a MEDIA or POOL update, a changed set of legs or a port change, which re-create the engine session, keep the sequence, or no re-create on update; FLOWS keeps it in place (D-236) |
-| UDP port | `tv_update_dst` overwrites the destination UDP port with the source port, still at HEAD; PR #1770 (open) fixes it (not a §7 row) | — | a prerequisite of G1a |
+| UDP port | `tv_update_dst` overwrote the destination UDP port with the source port; fixed on main, `fc331c22e`: without `udp_src_port` the source port follows the new destination port (not a §7 row) | `st_tx_video_session.c:3845-3849` | a prerequisite of G1a |
 
 The TX builders copy the header template into every packet (`st_tx_video_session.c:1079`, `:1124`,
 `:1230`).
@@ -1020,12 +1020,12 @@ legacy `mtl_uninit` order is fixed too, as a bugfix (OI-3, MS1 task E1d).
 |---|---|---|
 | TX video queue hang (no good burst for 1 s) | `st20_tx_queue_fatal_error` on the transmitter: drain rings, swap the queue, complete held frames as COMPLETE, re-create mempools; one `ST_EVENT_RECOVERY_ERROR` without frame IDs | MS1: the recovery verdict (below); MS6: a flag, and a worker quiesces the session (the tasklet skips it, the worker locks, swaps, releases); `MTL_EVENT_RECOVERY` (R1) |
 | TX audio queue hang | per manager, every session's mempool re-created, no event (`st_tx_audio_session.c:2717-2775`); blocking spinlocks on the tasklet (`:2741`) | same worker path (MS6) |
-| TX ANC / fastmeta hang | no detection (no `fatal_error` in those files) | detection is open: an item of the fault matrix (MS6) |
+| TX ANC / fastmeta hang | no detection (no `fatal_error` in `st_tx_ancillary_session.c`, which serves both) | detection is open: an item of the fault matrix (MS6) |
 | AF_XDP, kernel socket TX hang | `ST_EVENT_FATAL_ERROR`, session stays "active" (`st_tx_video_session.c:4186-4190`) | the binding's `notify_event` turns it into ERROR with a reason |
 | link down at runtime | not detected (no `rte_eth_dev_callback_register`, no LSC poll); TX loops in recovery, RX goes silent | link monitor (MS5): LSC interrupt or `rte_eth_link_get_nowait` every 100 ms on the admin thread; netlink on socket and AF_XDP backends; a down leg is skipped (`pkts_skipped`), its queue reset through §4; `MTL_EVENT_LEG_STATE`, `MTL_EVENT_RX_SIGNAL` |
 | VF reset, device removal | not handled; `inf->resetting` only brackets `rte_tm_hierarchy_commit` (`dev/mt_dev.c:768-772`) | RMV, RESET and RECOVERY ethdev callbacks posted to the admin worker (EK14, MS3); `MTL_EVENT_PORT_RESET`, `MTL_EVENT_PORT_REMOVED`; a removed port fails calls with `-MTL_ENODEV` and still lets close succeed |
 | PTP loss | `locked`/`connected` never cleared (SF-20); `instance_in_reset` never set (SF-19) | lock state that clears, `MTL_EVENT_TIME_STATE` (E9, MS6) |
-| MtlManager death | no reconnect; `send()` passes `MSG_NOSIGNAL` since `d65ecb135` (`mt_instance.c:15-32`) | `MSG_NOSIGNAL`, timeouts, `MTL_EVENT_MANAGER_LOST`, reconnect with re-registration (EK4, EK5: MS3; reconnect MS5) |
+| MtlManager death | no reconnect; `recv` has no timeout; `send` uses `MSG_NOSIGNAL` since `d65ecb135` (`mt_instance.c:15-32`) | `MSG_NOSIGNAL`, timeouts, `MTL_EVENT_MANAGER_LOST`, reconnect with re-registration (EK4, EK5: MS3; reconnect MS5) |
 | RX auto-detect | `rv_init_sw` on the tasklet (called at `st_rx_video_session.c:2944`, defined at `:2668`) | worker (MS6), with the same quiesce handshake as TX recovery; RX queue overflow while the worker re-allocates for the detected format is accepted (the packets of that transition are lost and counted); unified sessions: none, sized for the maximum at create (E14, MS3) |
 
 **The recovery verdict** (MS1, task E1a, D-123). Until R1 moves it to a worker, recovery stays on
@@ -1096,11 +1096,11 @@ stays listed so that nobody adds it again.
 | R2 | exactly-once `notify_frame_done` for legacy callbacks: core sessions by the completion CAS, the legacy pipelines when they become wrappers on the core | SF-05, SF-38, SF-39 | `st20_pipeline_tx.c`, `st_tx_video_session.c` | on | — | MS1 for core sessions; legacy st20p in MS2b, MS4 for the other pipelines (their re-base) |
 | MF1 | `tv_frame_free_cb`: CAS claim, decrement `refcnt` and clear `addr/iova` before any completion | re-arming from the callback fails or loses its address; double report with recovery | `st_tx_video_session.c:121-158`; `st20_pipeline_tx.c:266-278` | on | — | MS1 (task E1a, unless PR #1770 landed) |
 | MF2 | map regions into every device they are used with | `mtl_dma_map` maps port P only (SF-07) | `mt_main.c:864-865` | on (replaced by regions) | — | MS2 (video memory) |
-| MF3 | `mt_map_add` overlap check | misses an enclosing range (SF-06) | `mt_dma.c:37-41` | on | — | PR #1770; else MS2 |
-| MF4 | stop silent recycle of RX ext frames; report | SF-18 | `st_rx_video_session.c:993-997` | on | — | legacy: PR #1770 part; core sessions: unnecessary (below the table) |
-| MF5 | reject DMA offload for regions not mapped into the DMA engine | DMA to IOVA 0 (SP-05) | `st_rx_video_session.c:2676-2680` | on | — | PR #1770; MS2 for regions |
-| MF6 | validate `buf_len` of RX dedicated ext frames | unchecked (SF-17) | `st_rx_video_session.c:444-455` | on | — | PR #1770; MS2 for ext frames |
-| MF7 | a builder reference on `sh_info` from frame start to last attach; idle cleanup only in `WAIT_FRAME` (§2.3) | the count starts at 0 (`st_tx_video_session.c:254`), rises per attach (`:1315`, `:1726`): freeing all packets built so far completes the frame mid-build **[inferred]** | `st_tx_video_session.c:1979`, `:1312-1315`; `st_video_transmitter.c:673-686` | on | — | MS1 (tasks E1a, E1b) |
+| MF3 | `mt_map_add` overlap check | misses an enclosing range (SF-06) | `mt_dma.c:37-41` | on | — | PR #1770 (merged on main, `bb008e076`); else MS2 |
+| MF4 | stop silent recycle of RX ext frames; report | SF-18 | `st_rx_video_session.c:993-997` | on | — | legacy: PR #1770 part (did not land on main); core sessions: unnecessary (below the table) |
+| MF5 | reject DMA offload for regions not mapped into the DMA engine | DMA to IOVA 0 (SP-05) | `st_rx_video_session.c:2676-2680` | on | — | PR #1770 (merged on main, `20028d26e`); MS2 for regions |
+| MF6 | validate `buf_len` of RX dedicated ext frames | unchecked (SF-17) | `st_rx_video_session.c:444-455` | on | — | PR #1770 (merged on main, `7aa23c45c`); MS2 for ext frames |
+| MF7 | a builder reference on `sh_info` from frame start to last attach; idle cleanup only in `WAIT_FRAME` (§2.3) | the count starts at 0 (`st_tx_video_session.c:254`), rises per attach (`:1315`, `:1726`): freeing all packets built so far completes the frame mid-build **[inferred]** | `st_tx_video_session.c:1980`, `:1312-1315`; `st_video_transmitter.c:673-686` | on | — | MS1 (tasks E1a, E1b) |
 | MF8 | held slot state, once-only completion hook, flush reclaim in the pipelines | [core.md](core.md) §3 | `st*_pipeline_tx.c` | on (via R2) | — | unnecessary (below the table) |
 | MF9 | entry points to set the transport linesize and RX `ext_frames[]` after create, before start | both fixed at create; copy-chain mempool sized from the linesize | `st_tx_video_session.c:3351-3357`, `:2999-3013`; `st_rx_video_session.c:3471-3479`, `:444-455` | internal | — | MS2, TX and RX linesize only (below the table) |
 | MF10 | RX hold count and HELD state, last-reference CAS to FREE | `unit.hold` | `rv_put_frame` `st_rx_video_session.c:227-236` | internal | — | unnecessary in the engine (below the table); core MS2 |
@@ -1142,9 +1142,9 @@ stays listed so that nobody adds it again.
 | PE1 | one shared chunk expander on the TX tasklet (header mbufs plus extbuf attaches per slot, one `shinfo` per chunk whose `free_cb` completes the chunk) feeding each TX engine's existing RTP ring, about 10 lines per engine where it dequeues `packet_ring` ([core.md](core.md) §2.3) | packet units (§7.4) | `st_tx_video_session.c:1312`, `:1723` (the frame chain pattern) | — | — | MS5 |
 | PE2 | explicit unit end; per-unit packet accounting; field parity from the unit index | §7.4 #3 | `st_tx_video_session.c:1409-1427` | — | — | MS5 |
 | PE3 | media time and launch into the RTP-mode pacing sync (shared with E1) | §7.4 #2 | `st_tx_video_session.c:1427`; `st_tx_audio_session.c:991` | — | — | MS5 |
-| PE4 | ST40/ST41 RTP TX: sync before the gate | §7.4 #4 | `st_tx_ancillary_session.c:1293-1306`, `:832`, `:897` (also the fast metadata mode) | — | — | MS5 |
+| PE4 | ST40 RTP TX (RFC 8331 and fast metadata): sync before the gate | §7.4 #4 | `st_tx_ancillary_session.c:1293-1306`, `:832`, `:897` | — | — | MS5 |
 | PE5 | ST40 chain pointer and byte-order paths | §7.4 #5 | `st_tx_ancillary_session.c:886-888`, `:819-821` | — | — | MS5 |
-| PE6 | RX: reference before enqueue, dedup bit after enqueue, `last_pkt_idx` reset (SF-69), a past-timestamp guard; the same order in ST30/40/41 | §7.4 #7–#9 | `st_rx_video_session.c:2028`, `:2066-2073` | on (legacy bugfix, D-24) | — | MS1 for SF-69 (the reorder counter of the MS1 stats); the rest any time, at the latest MS5 |
+| PE6 | RX: reference before enqueue, dedup bit after enqueue, `last_pkt_idx` reset (SF-69), a past-timestamp guard; the same order in ST30/40 | §7.4 #7–#9 | `st_rx_video_session.c:2028`, `:2066-2073` | on (legacy bugfix, D-24) | — | MS1 for SF-69 (the reorder counter of the MS1 stats); the rest any time, at the latest MS5 |
 | PE7 | a per-session RTP packet size limit, `sc.max_udp_payload` (1452 B by default; TX default `instance.max_udp_payload`; up to the port MTU − 28 for `MTL_RTP`), not the fixed 1352 B: ST 2022-6 packets are 1396–1456 B (ST 2022-6 §6.2–§6.5); the RX data room from the limit; the 2022-6 linear schedule | §7.4 #1; SF-77 | `mt_util.h:19-24` and callers; `dev/mt_dev.c:1397` | — | — | MS5 |
 | PE8 | ST41 RX: dedup threshold counter, duplicates not errors, DIT and K filters | §7.4 #14 | `st_rx_ancillary_session.c:592-612`, `:751-752` (the ST40 path, fast metadata mode included) | — | — | MS5 |
 | PE9 | legacy only: validate power-of-two ring sizes and ST22 `rtp_frame_total_pkts`; fix the `notify_rtp_done` doc; TX RTCP chain offset | §7.4 #6, #10, #11 | `st_tx_video_session.c:3030-3033`, `:4227-4240`; `mt_rtcp.c:41-43` | on (legacy bugfix) | — | any time (legacy bugfix), at the latest MS5 |
@@ -1233,7 +1233,7 @@ fastmeta `st_tx_ancillary_session.c:1803-1805`). The GPM and ST22 packers use
   `rv_put_frame` (`st_rx_video_session.c:227-236`) stays as it is.
 - **MF4** for core sessions: the RX binding always sets `ST20_RX_FLAG_RECEIVE_INCOMPLETE_FRAME`
   (task E1c), so the silent recycle at `st_rx_video_session.c:993-997` is never reached; the binding
-  counts what `MTL_RX_DISCARD` drops. The legacy fix stays (PR #1770 part).
+  counts what `MTL_RX_DISCARD` drops. The legacy fix stays (the PR #1770 part did not land on main).
 - **MF9**, the RX `ext_frames[]` half: the RX binding implements `query_ext_frame` (from MS1) and
   hands the engine the slot's buffer per unit, so `ext_frames[]` after create is not needed. The
   linesize half stays for both directions (`st_tx_video_session.c:3351-3357`,
@@ -1371,14 +1371,14 @@ do not change).
 
 ## 7. Known defects
 
-Defects of today's `lib/` at `545a266a`. Status legend: **#1770** = fixed in open PR #1770
-(`fix/side-findings`, not merged; SF-05 and SF-08 are still present at HEAD **[verified at
-HEAD]**); **#1770 part** = partly; **fixed on main** (`<commit>`) = fixed after the baseline by that
-commit of `main`, or moot because it removed the code (**in part** = partly); **open** with the
-change that fixes it and its milestone. The status column was checked against PR #1770 at head
-`74b9991d` (38 commits, +3208/−371 in 132 files) by reading its diff and commit messages. Most rows
-are worth fixing before the code that relies on them (§2.7). PR #1770 also fixes two defects not
-listed here: one in `tv_update_dst` ([§2.17](#217-updates-on-a-running-session-today)) and a
+Defects of today's `lib/` at `545a266a`. Status legend: **#1770** = fixed in PR #1770
+(`fix/side-findings`, merged on main on 2026-10-07; SF-05 and SF-08 are fixed on main); **#1770
+part** = partly; **fixed on main** (`<commit>`) = fixed after the baseline by that commit of `main`,
+or moot because it removed the code (**in part** = partly); **open** with the change that fixes it
+and its milestone. The status column was checked against PR #1770 at head `74b9991d` (38 commits,
++3208/−371 in 132 files) by reading its diff and commit messages. Most rows are worth fixing before
+the code that relies on them (§2.7). PR #1770 also fixed two defects not listed here: one in
+`tv_update_dst` (on main as `fc331c22e`) ([§2.17](#217-updates-on-a-running-session-today)) and a
 misleading `st20_tx_set_ext_frame` warning. Row details follow the §7.1 table.
 
 The **Test** column is the cheapest tier that can catch the defect, which a fixer picks first
@@ -1405,12 +1405,12 @@ so each needs a reproducing test before a fix; the same holds for any row whose 
 | SF-10 | ST30 `sync_pacing` RTP computed then overwritten (dead code) | `st_tx_audio_session.c:334-354` vs `:395` | open | review |
 | SF-11 | ST22 invalid codestream size fires `notify_frame_done` as if sent | `st_tx_video_session.c:2485-2491` | open (E10, MS4b) | unit |
 | SF-12 | TX recovery reports in-flight frames COMPLETE and runs on the tasklet | `st_tx_video_session.c:4250-4351`, `:4309-4319` → `st20_pipeline_tx.c:278-292`; pthread mutex `dev/mt_dev.c:1929` | open (R1: the verdict MS1 task E1a, worker MS6) | UB |
-| SF-13 | same-session stats getter from a callback spins forever | `st_tx_video_session.c:2699` + `:4782`; `st20_pipeline_tx.c:1320` | fixed on main in part (`42ac685b2`, docs only) | UB |
+| SF-13 | same-session stats getter from a callback spins forever | `st_tx_video_session.c:2699` + `:4782`; `st20_pipeline_tx.c:1320` | open; docs only on main (`42ac685b2`) | UB |
 | SF-14 | `update_destination` / `update_source` hold the spinlock across ARP or flow/IGMP work ([§2.17](#217-updates-on-a-running-session-today)) | [§2.17](#217-updates-on-a-running-session-today) | open (G1: MS3 video, MS4 the other essences) | integration |
-| SF-15 | BLOCK_GET mutex + cond on the tasklet | `st20_pipeline_tx.c:29-47`, `:782-798` | open (core sessions: `mt_wake`, MS1; st20p: the MS2b re-base, BLOCK_GET the WT acquire with `kick`, LB-14; the others MS4) | review, perf |
-| SF-16 | `*_wake_block()` does not end a blocked `get_frame` early | `st20_pipeline_tx.c:789-797` | fixed on main (`0d05bbd40`); on the core the MS2b `kick`: `wake_block` makes a blocked `get_frame` return NULL once (LB-14, `St20pLegacy.wake_block_once`) | unit |
+| SF-15 | BLOCK_GET mutex + cond on the tasklet | `st20_pipeline_tx.c:36-47`, `:782-798`; RX `st20_pipeline_rx.c:37-48`, `:865-877` | open (core sessions: `mt_wake`, MS1; st20p: the MS2b re-base, BLOCK_GET the WT acquire with `kick`, LB-14; the others MS4) | review, perf |
+| SF-16 | `*_wake_block()` does not end a blocked `get_frame` early | `st20_pipeline_tx.c:789-797` | fixed on main (`0d05bbd40`; RX `wake_block` always ended the wait); on the core the MS2b `kick`: `wake_block` makes a blocked `get_frame` return NULL once (LB-14, `St20pLegacy.wake_block_once`) | unit |
 | SF-17 | RX `query_ext_frame` `addr`/`iova` and dedicated `buf_len` unchecked | `st_rx_video_session.c:1306`, `:444-455` | fixed on main (`7aa23c45c`; MF6) | unit |
-| SF-18 | dropped RX ext frames recycled silently | `st_rx_video_session.c:993-997` | #1770 part (MF4; core sessions avoid it, MS1) | UB |
+| SF-18 | dropped RX ext frames recycled silently | `st_rx_video_session.c:993-997` | open (the #1770 part did not land on main; MF4; core sessions avoid it, MS1) | UB |
 | SF-19 | `instance_in_reset` never set | `mt_main.c:534`, `mt_stat.c:49` | open | review |
 | SF-20 | PTP `locked`/`connected` never cleared | `mt_ptp.c:540-552`, `:1317` | open (E9, MS6) | unit |
 | SF-21 | built-in PTP switches UTC → PHC mid-run (~37 s step) | `mt_ptp.c:1062-1067`; `dev/mt_dev.c:1675-1679` | open (E9, MS6) | integration |
@@ -1431,14 +1431,14 @@ so each needs a reproducing test before a fix; the same holds for any row whose 
 | SF-36 | kernel-socket `update_destination` does not redirect GSO ([§2.17](#217-updates-on-a-running-session-today)) | [§2.17](#217-updates-on-a-running-session-today) | fixed on main (`8224aba52`) | integration |
 | SF-37 | `update_destination` leaves the RTCP TX header stale ([§2.17](#217-updates-on-a-running-session-today)) | [§2.17](#217-updates-on-a-running-session-today) | open ([§2.17](#217-updates-on-a-running-session-today)) | unit |
 | SF-38 | builder claims a frame and returns without building it | `st20_pipeline_tx.c:212-215`; `st_tx_video_session.c:1953-1970` **[verified at HEAD]** | open (R2: the TX binding for core sessions, MS1; st20p at the MS2 re-base) | UB |
-| SF-39 | double completion window, free callback vs recovery | `st_tx_video_session.c:132-151` vs `:4314-4319` | #1770 part (the completion CAS, MS1) | UB stress |
+| SF-39 | double completion window, free callback vs recovery | `st_tx_video_session.c:132-151` vs `:4314-4319` | open (the completion CAS, MS1; `8c9d48f3e` reorders the free callback but leaves the window) | UB stress |
 | SF-40 | `mtl_is_manager_alive()` logs `err` without a manager; new connection per call; `mt_instance_init` also warns "connect to manager fail, assume single instance mode" in the normal configuration without MtlManager | `mt_instance.c:255-271` (`err` at `:266`); `:201` | open | — |
 | SF-41 | TX recovery zeroes `sh_info` while mbufs are in descriptors | `st_tx_video_session.c:4309-4320` **[verified at HEAD]** | open (R1's verdict, MS1 task E1a) | UB |
 | SF-42 | `tx_st22p_frame_done` leaves IN_TRANSMITTING by load then store | `st22_pipeline_tx.c:276-278` | open (the st22p re-base onto the core, MS4) | — |
 | SF-43 | OBS output labels a monotonic timestamp MEDIA_CLK | `ecosystem/obs_mtl/linux-mtl/mtl-output.c:224-225` | open | — |
 | SF-44 | `tx_st20p_newest_available` returns the oldest; `seq` at `get_frame` | `st20_pipeline_tx.c:64-79`, `:817` **[verified at HEAD]** | open (`seq` at submit: the core, MS1; st20p at the MS2 re-base) | — |
 | SF-45 | refused `notify_frame_ready` drops a frame counted as received | `st_rx_video_session.c:954-960` **[verified at HEAD]**; ST22 `:1064-1069` | open (the RX binding, MS1 task E1c) | — |
-| SF-46 | RX DMA busy drops a new frame's packets silently | `st_rx_video_session.c:1229-1235` **[verified at HEAD]**, `:3705-3711` | open (`dma_busy` cause; B3, else MS2a); since `f64db786a` only after a bounded DMA flush | — |
+| SF-46 | RX DMA busy drops a new frame's packets silently | `st_rx_video_session.c:1229-1235` **[verified at HEAD]**, `:3705-3711` | fixed on main in part (`f64db786a`: a bounded flush first, `:1571-1590`; a drop follows only a timeout); open: the `dma_busy` cause (B3, else MS2a) | — |
 | SF-47 | MtlManager socket world-accessible; identity self-reported | `manager/mtl_manager.cpp:112-117` (0666 since `04138ad2c`); `manager/mtl_instance.hpp:192-193`, `:244-269` | open (EK5, MS3) | — |
 | SF-48 | MtlManager can die of SIGPIPE | `manager/mtl_instance.hpp:58`, `:269`; `manager/mtl_manager.cpp:72-77` | open (EK5, MS3) | — |
 | SF-49 | thread-mode schedulers never registered with EAL | `mt_sch.c:250-255`, `:283-285` **[verified at HEAD]** | open (§1.5) | — |
@@ -1446,7 +1446,7 @@ so each needs a reproducing test before a fix; the same holds for any row whose 
 | SF-51 | `udp_port = 0` defaults differ between TX create, TX update and RX: audio TX create 10100 + 2i, TX update and RX 20000 + 2i; ANC and fastmeta TX create 10200 + 2i, TX update and RX 30000 + 2i | `st_tx_audio_session.c:2126`, `:2261`; `st_rx_audio_session.c:997`; `st_tx_ancillary_session.c:1782`, `:1959` **[verified at HEAD]** | open (`udp_port` required) | — |
 | SF-52 | deterministic default SSRCs `idx` + base: video 0x123450, audio 0x223450, ANC and fastmeta both 0x323450 | `st_tx_video_session.c:983`, `st_tx_audio_session.c:188`, `st_tx_ancillary_session.c:259` (also the fast metadata mode) **[verified at HEAD]** | open | — |
 | SF-53 | TX audio sessions named `"RX_AUDIO_M%dS%d"` | `st_tx_audio_session.c:2116` | open | — |
-| SF-54 | split-forward sample sets `ops_rx.interlaced` in the TX loop | `app/sample/fwd/rx_st20_tx_st20_split_fwd.c:266` | open | — |
+| SF-54 | split-forward sample sets `ops_rx.interlaced` in the TX loop | `app/sample/fwd/rx_st20_tx_st20_split_fwd.c:267` | open | — |
 | SF-55 | GStreamer st20p sink copies the whole GstMemory into a smaller frame | `ecosystem/gstreamer_plugin/gst_mtl_st20p_tx.c:704-722` | open | — |
 | SF-56 | unregister timeout followed by the session free | `mt_sch.c:883-899` **[verified at HEAD]** | open (EK2, MS3) | — |
 | SF-57 | SysV lcore table with `kill(pid, 0)` across PID namespaces | `mt_sch.c:683-697`, `:1292-1317` | open (EK6, MS3) | — |
@@ -1481,7 +1481,7 @@ so each needs a reproducing test before a fix; the same holds for any row whose 
 | SF-86 | the GStreamer RX passes a plane count where a format is expected | `st_frame_fmt_planes(video_meta->n_planes)`, `gst_mtl_st20p_rx.c:601` | open: the plugin port (MS6) or a one-line legacy fix | — |
 | SF-87 | ANC TX frame mode sizes a frame as ⌈Σ udw × 10 / 8 / 1432⌉ RTP packets, ignoring each ANC packet's header, DID/SDID/DC/checksum words and word_align, so ANC packets that did not fit are dropped silently (606 of 5 120 shapes; row details) | `st_tx_ancillary_session.c:1041-1063`, `:644-649`, `:692-694`, `:1192-1234` **[verified at HEAD]** | open (E7, MS4a2; legacy bugfix) | UB |
 | SF-88 | an entry with `udw_size` > 255 fails the legacy encoder after the frame's earlier RTP packets left (split mode, or a frame of several RTP packets): a partial frame without a marker | `st_ancillary.c:213`; `st_tx_ancillary_session.c:661-673`, `:1136-1142`, `:1158-1164`, `:98-119` **[verified at HEAD]** | open (E7, MS4a2; legacy bugfix: the frame sends nothing) | UB |
-| SP-01 | `mtl_uninit` with live sessions self-deadlocks (`tv_mgr_uinit` holds the lock `tv_mgr_detach` takes; the same in TX and RX audio, ANC and fastmeta) | `st_tx_video_session.c:3821`, `:3926-3933`; `st_tx_audio_session.c:2537`; RX audio `st_rx_audio_session.c:1463` → `:1466` → `:1425` ([legacy-internals.md](legacy-internals.md)) | open (to confirm; MS1 avoids, MS3 fix) | repro first |
+| SP-01 | `mtl_uninit` with live sessions self-deadlocks (`tv_mgr_uinit` holds the lock `tv_mgr_detach` takes; the same in TX and RX audio and ANC) | `st_tx_video_session.c:3821`, `:3926-3933`; `st_tx_audio_session.c:2537`; RX audio `st_rx_audio_session.c:1463` → `:1466` → `:1425` ([legacy-internals.md](legacy-internals.md)) | open (to confirm; MS1 avoids, MS3 fix) | repro first |
 | SP-02 | `DATA_PATH_ONLY` on non-socket backends dereferences a NULL flow | `st_rx_video_session.c:3177-3180`; `datapath/mt_queue.c:65`, `:85` | fixed on main (`8afeaa6fc`) | repro first |
 | SP-03 | `USE_MULTI_THREADS`: tasklet and packet lcore on one session | `st_rx_video_session.c:3006-3012`, `:2583` | open | repro first |
 | SP-04 | `st20_tx_free` reads `s_impl->sch` while migration may rewrite it | `st_tx_video_session.c:4824`; `mt_admin.c:101-141` | open | repro first |
@@ -1566,11 +1566,11 @@ Row details:
   increments at `:1980`.
 - SF-12: recovery also counts the in-flight frames in `stat_frames_sent`, and runs a pthread
   mutex, a mempool re-create and INFO logs on the tasklet.
-- SF-13: the session spinlock is not recursive (outcome **[inferred]**); #1770 only adds a warning
-  to the getter docs.
-- SF-18 and SF-22, what #1770 leaves: for SF-18 a negative `notify_frame_ready` return now gives
-  the incomplete frame back, but the silent recycle remains; for SF-22 the copy and reset are under
-  the lock, but reset-on-read and iavf `tx_err` = 0 remain.
+- SF-13: the session spinlock is not recursive (outcome **[inferred]**); main (`42ac685b2`) only
+  adds a warning to the getter docs.
+- SF-18 and SF-22 on main: for SF-18 nothing landed, the incomplete-frame return is still ignored
+  (`st_rx_video_session.c:993-994`) and the silent recycle remains; for SF-22 the copy and reset are
+  under the lock (`bbf398a56`), but reset-on-read and iavf `tx_err` = 0 remain.
 - SF-25, the counters never written: `stat_epoch_troffset_mismatch` (ST20 TX),
   `st30_rx_user_stats.stat_pkts_dropped`, `st40_rx_user_stats.stat_pkts_dropped`, and video's
   `stat_epoch_mismatch` (written only by audio, ANC and fastmeta TX).
@@ -1594,8 +1594,9 @@ Row details:
 - SF-44: the intended FIFO with a wrong name (the converter comment at `:330` expects the oldest);
   because `seq` is assigned at `get_frame`, transmit order is acquire order.
 - SF-45: the frame returns to the pool after `stat_frames_received` was incremented (`:939`); the
-  only trace is an `err()` on the tasklet (`:957`). SF-46: counted only in
-  `dma_previous_busy_cnt`, which the stat dump prints and resets.
+  only trace is an `err()` on the tasklet (`:957`). SF-46: counted only in `dma_previous_busy_cnt`,
+  which the stat dump prints and resets; since `f64db786a` a drop follows only a timed-out flush,
+  and the timeouts are counted as "flush timeouts" on the same DMA stat line.
 - SF-51: fastmeta is an ANC mode since `88d47ac83` and takes the ANC defaults (ANC RX
   `st_rx_ancillary_session.c:1012`). A TX and an RX session left at defaults never meet, and an
   update with port 0 moves a TX session off the port its create chose.
@@ -1604,12 +1605,13 @@ Row details:
   smaller buffer (`:704`) and copies the GstMemory's `buffer_size` (`:722`), so
   `interlace-mode=interleaved` overflows the frame by one field. The PTS-pacing path also adds its
   offset to the upstream buffer's PTS in place (`:718`).
-- SP-01 affects TX video and TX and RX audio, ANC and fastmeta; RX video does not re-lock; the
-  leaked `s_impl` is never freed. SP-02: `8afeaa6fc` on main fails at create on backends that need a
-  flow. SP-05: `20028d26e` on main skips DMA offload for GPU frame buffers. SP-07a–d were not
-  re-verified at HEAD. SP-08: `d65ecb135` on main adds `MSG_NOSIGNAL` on both sends
-  (`mt_instance.c:17`, `:69`) with a unit test; reconnect, re-registration and the lcore re-announce
-  remain (MS5, G-98); the manager side is SF-48.
+- SP-01 affects TX video and TX and RX audio and ANC, fast metadata included; RX video does not
+  re-lock; the leaked `s_impl` is never freed. SP-02: `8afeaa6fc` on main fails at create on
+  backends that need a flow. SP-05: `20028d26e` on main skips DMA offload for GPU frame buffers.
+  SP-07a–d were not re-verified at HEAD. SP-08: `d65ecb135` on main adds `MSG_NOSIGNAL` on both
+  sends (`mt_instance.c:17`, `:69`) with a unit test (`tests/unit/main/mt_instance_test.cpp`);
+  reconnect, re-registration and the lcore re-announce remain (MS5, G-98); the manager side is
+  SF-48.
 - DD-16: `65a0b610f` on main documents `rtp_ring_size` as unused; the ST40P FORCE_NUMA text remains.
 
 **Consumer findings (SC)** in the Rust bindings, FFmpeg, GStreamer, OBS and the samples:
@@ -1622,11 +1624,12 @@ Row details:
 | SC-04 | FFmpeg sets `ST20_RX_FLAG_DMA_OFFLOAD` on `st20p_rx_ops`, and a sample sets `ST30P_TX_FLAG_BLOCK_GET` on RX ops; both work only because the bit values coincide | `mtl_st20p_rx.c:176`; `app/sample/rx_st30_pipeline_sample.c:163` | open |
 | SC-05 | GStreamer st20p RX `zero_copy` is always true for the two accepted formats, so the memcpy path is dead | `gst_mtl_st20p_rx.c:274` | open |
 | SC-06 | GStreamer never calls `wake_block` and has no `unlock` vfunc: a flush waits out the 1 s timeout | no `wake_block` in `ecosystem/gstreamer_plugin/` | open |
-| SC-07 | samples: `pthread_create` checked with `< 0`; the st20p split-forward sample never increments `fb_fwd` (always exits `-EIO`); the ext-frame sample frees DMA memory before `st20p_tx_free`; put returns ignored | `app/sample/tx_st22_pipeline_sample.c:254`; `app/sample/fwd/rx_st20p_tx_st20p_split_fwd.c:253-254` | #1770 part (below) |
+| SC-07 | samples: `pthread_create` checked with `< 0`; the st20p split-forward sample never increments `fb_fwd` (always exits `-EIO`); the ext-frame sample frees DMA memory before `st20p_tx_free`; put returns ignored | `app/sample/tx_st22_pipeline_sample.c:254`; `app/sample/fwd/rx_st20p_tx_st20p_split_fwd.c:253-254` | open (the #1770 sample fixes did not land on main; below) |
 | SC-08 | OBS: `pthread_mutex_unlock` on a mutex that is not held | `ecosystem/obs_mtl/linux-mtl/mtl-input.c:117-124` | fixed on main (`bc98117b6`) |
 
-SC-07: #1770 fixes the first three, a double frame put and a dropped-frame return; other ignored
-put returns remain.
+SC-07: PR #1770 fixed the first three, a double frame put and a dropped-frame return, but none of
+its sample fixes landed on main (since the baseline only `app/sample/README.md` changed), so the row
+is open.
 
 ### 7.2 Documentation drift (DD)
 
@@ -1641,7 +1644,7 @@ of [legacy-internals.md](legacy-internals.md) ("#n" below).
 | DD-04 | KB lists pipeline prefixes without `st40p_` | KB `:41` (#12) | fixed on main (`df27e6f28`) |
 | DD-05 | `doc/design.md:390` names `ST40P_TX_FLAG_EXT_FRAME`, which does not exist | `include/st40_pipeline_api.h:81-135` (#1) | fixed on main (`17b793074`) |
 | DD-06 | `doc/design.md` §6.11 repeats USER_TIMESTAMP and never describes USER_PACING | `doc/design.md:543-552` (#13) | fixed on main (`17b793074`) |
-| DD-07 | `doc/design.md` §6.13 update list misses st41, st30p, st40p | `doc/design.md:558-579` (#14) | fixed on main (`17b793074`) |
+| DD-07 | `doc/design.md` §6.13 update list misses st41, st30p, st40p | `doc/design.md:558-579` (#14) | fixed on main (`17b793074`; the st41 part is moot since `88d47ac83`) |
 | DD-08 | `doc/design.md:623` says ST40 RX is RTP-only | st40p uses the frame-level ST40 RX, `st40_pipeline_rx.c:177` (#2) | fixed on main (`17b793074`) |
 | DD-09 | `doc/design.md` §8.2 says video RTP reflects the wire time | `doc/design.md:681-686` vs `st_tx_video_session.c:732-747` (#15) | fixed on main (`17b793074`) |
 | DD-10 | `doc/experimental/af_xdp.md:54` uses `af_xdp:`; code knows `dpdk_af_xdp:` | `mt_util.c:962` | fixed on main (`17b793074`) |
@@ -1677,7 +1680,7 @@ hazard is fixed by the EK row named, in MS3 unless §6 says otherwise. Severity 
 | H-K-3 | PTP client leaves a shared PF PHC's frequency offset | `mt_ptp.c:358-390` | EK10 | High |
 | H-K-4 | DaemonSet manager resolves pod ifindexes in its own namespace: XDP on the wrong interface **[inferred]** | below the table | EK5 | Critical (DaemonSet only) |
 | H-K-5 | manager restart: clients never reconnect, so grants are lost, and the new manager's `clear_flow_rules` deletes every ntuple rule on the interface, live ones included | below the table | EK5 | High |
-| H-K-6 | manager dies on SIGTERM or SIGPIPE without cleanup | only SIGINT handled | EK5 | High |
+| H-K-6 | manager dies on SIGPIPE without cleanup | SIGINT, and SIGTERM since `b10015803` (`manager/mtl_manager.cpp:75`), are handled; nothing ignores SIGPIPE | EK5 | High |
 | H-K-7 | manager socket world-writable, identity self-reported | SF-47 | EK5 | High |
 | H-K-8 | library blocks forever on manager loss (it raised SIGPIPE before `MSG_NOSIGNAL`, `d65ecb135`) | `mt_instance.c:17-31` | EK4 | High |
 | H-K-9 | lcore allocators keyed by remapped lcore ID, not CPU | `mt_sch.c:742-758` | EK6 | High (shared manager; Low under the static CPU manager) |
@@ -1689,7 +1692,7 @@ hazard is fixed by the EK row named, in MS3 unless §6 says otherwise. Severity 
 | H-K-15 | additive teardown (about 1 s per held frame) exceeds the grace period | `st20_pipeline_tx.c:730-761` | EK1 | Medium |
 | H-K-16 | no SIGTERM path: the library installs no handler, RxTxApp and the samples catch only SIGINT, so as PID 1 the process ignores SIGTERM | below the table | R8, `mtl_instance_abort`, the ex16 recipe; recommend an init (`tini`) in the image (the compose files already set `init: true`, `docker/docker-compose.yml:14`) | Medium |
 | H-K-17 | IGMP not left, no gratuitous ARP | `mt_mcast.c:527-559` | EK9; document the switch timeout window after a SIGKILL (no leave: about 260 s with IGMP defaults) | Medium |
-| H-K-18 | VF state in the PF survives until VF reset | vfio FLR | EK16; report a VF reset failure at open | Medium |
+| H-K-18 | VF state in the PF survives until VF reset; the iavf queue rates since `46d4b0c36` only after an unclean exit, and a TSC init clears them since `41d9f31a5` (DPDK ≥ 26.07.91) | vfio FLR; `dev/mt_dev.c:2184-2187`, `:1570-1613` | EK16; report a VF reset failure at open | Medium |
 | H-K-19 | AF_XDP `tx_maxrate` left set; manager filter refcount leak | `dev/mt_af_xdp.c:867-892` | EK5 | Medium |
 | H-K-20 | startup blocks up to 30 s (link), 60 s (ARP), 180 s (PTP); `mtl_init` not retryable | `dev/mt_dev.c:500-503`, `:845-880` | EK18 | Medium |
 | H-K-21 | no heartbeat; the stats reader resets and races | — | EK11 | Medium |
@@ -1728,9 +1731,9 @@ as bugfixes (PE rows of §6); the unified packet units (MS5) avoid them by desig
 | 1 | ST 2022-6 cannot be sent: its RTP packets are 1396–1456 B (12 B RTP + 8 B HBRMT + 1376 B media, + 4 B video timestamp, + extensions), and every RTP-level create and put rejects anything above `MTL_PKT_MAX_RTP_BYTES` = 1352 B (SF-77) | `include/mtl_api.h:89`, `mt_util.h:19-24`, TX `:4694-4698` | verified (ST 2022-6 §6.2–§6.5) | PE7 |
 | 2 | `USER_PACING` and `EXACT_USER_PACING` silently ignored in RTP mode on every essence | TX `:1427`; `st_tx_audio_session.c:991`; ANC and fastmeta `sync_pacing(impl, s, 0)` | verified | PE3 |
 | 3 | a frame boundary only by a timestamp change; marker and packet count unchecked | TX `:1409`; ANC `:809`, `:877` | verified | PE2 |
-| 4 | ST40 and ST41 TX: the first packet of a frame goes one epoch early (the TSC gate runs before the pacing sync) | ANC gate `st_tx_ancillary_session.c:1293-1306` vs sync `:832`, `:897`, fast metadata mode included since `88d47ac83` ([legacy-internals.md](legacy-internals.md)) | inferred | PE4 |
+| 4 | ST40 TX (RFC 8331 and fast metadata): the first packet of a frame goes one epoch early (the TSC gate runs before the pacing sync) | ANC gate `st_tx_ancillary_session.c:1293-1306` vs sync `:832`, `:897` ([legacy-internals.md](legacy-internals.md)) | inferred | PE4 |
 | 5 | ST40 chain path: out-of-bounds pointer; inconsistent RFC 8331 byte order | `st_tx_ancillary_session.c:886-888`, `:819-821`, `:902` | verified | PE5 |
-| 6 | `notify_rtp_done` before transmit; for ST30/40/41 before the header mbuf is allocated, so an allocation failure drops a packet already reported done | TX `:2278`; `st_tx_audio_session.c:1020-1039` | verified | PE9 (doc) |
+| 6 | `notify_rtp_done` before transmit; for ST30/40 before the header mbuf is allocated, so an allocation failure drops a packet already reported done | TX `:2278`; `st_tx_audio_session.c:1020-1039` | verified | PE9 (doc) |
 | 7 | RX: the mbuf is enqueued to the application ring before `rte_mbuf_refcnt_update(+1)` | RX `:2066` vs `:2073` | order verified at HEAD, race inferred | PE6 |
 | 8 | RX ring full defeats ST 2022-7: the bitmap bit is set before the enqueue, so a ring-full drop on one leg also discards the other leg's copy as a duplicate (all essences) | RX `:2028` vs `:2066`; audio `:584-624`; ANC `:550-672` | order verified at HEAD | PE6 |
 | 9 | RX `last_pkt_idx[]` not reset on slot reuse | SF-69 | code verified at HEAD, effect inferred | PE6 |
@@ -1739,7 +1742,7 @@ as bugfixes (PE rows of §6); the unified packet units (MS5) avoid them by desig
 | 12 | no-chain redundant TX error path frees uninitialised `pkts_r[]` slots | TX `:2317-2322` | inferred | — |
 | 13 | RX hold budget unchecked: a slow application holds up to `rtp_ring_size` mbufs of a queue pool sized `nb_rx_desc + 1024` (`MT_DEV_RX_DESC` = 2048), shared by every session on a shared queue | `dev/mt_dev.c:1383`, `dev/mt_dev.h:11` | inferred | packet units (bounded holds) |
 | 14 | ST41 RX: `redundant_error_cnt[]` never incremented, so the dedup threshold never recovers and every 2022-7 duplicate counts as `err_packets`; the documented `fmd_dit`/`k_bit` filters are missing | moot (`88d47ac83`): ST40 RX, duplicates not errors, `st_rx_ancillary_session.c:592-612`, `:751-752`; no DIT or K-bit filter fields | verified | PE8 |
-| 15 | the ST40 RTP fuzz target no longer reaches the RTP path (zeroed ops select frame level) | `tests/fuzz/st40/st40_rx_rtp_fuzz.c:132`, `:181` | inferred | — |
+| 15 | the ST40 RTP fuzz target no longer reaches the RTP path (zeroed ops select frame level) | fixed on main, `a973066f1`: the target sets `ST40_TYPE_RTP_LEVEL` (`tests/fuzz/st40/st40_rx_rtp_fuzz.c:147`) | inferred | done |
 | 16 | stale documentation of the RTP level | DD-08, DD-19, DD-20 | verified | docs |
 
 ## 8. Where the detail is
