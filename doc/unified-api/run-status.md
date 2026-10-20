@@ -42,8 +42,8 @@ the one in Needs is done or done with exceptions.
 
 | Milestone | Ledger | Needs | State | Lead agent | Exit commit | Exit evidence |
 |---|---|---|---|---|---|---|
-| R0 (re-pin to the new base, autonomous-run.md §1) | this file | — | in progress | `a382f8ddd6f259ae0` | | |
-| L0 (the legacy baseline, autonomous-run.md §1) | this file, §1 | R0 | todo | | | |
+| R0 (re-pin to the new base, autonomous-run.md §1) | this file | — | done | `a382f8ddd6f259ae0` | `e3bb41c2` | 10 docs commits `1f600403..e3bb41c2`; `sketch/check.sh` OK; `mtl-reviewer` (Opus) over the range: 3 MAJOR and 12 MINOR fixed, then APPROVE (`wip/unified-api-impl/r0/review-r0.md`); D-246–D-253 in §3 |
+| L0 (the legacy baseline, autonomous-run.md §1) | this file, §1 | R0 | in progress | | | |
 | MS1 | [ms1-status.md](ms1-status.md) | L0 | todo | | | |
 | MS2a | ms2a-status.md | MS1 | todo | | | |
 | MS2b | ms2b-status.md | MS2a | todo | | | |
