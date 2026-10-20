@@ -4,7 +4,7 @@
 |---|---|
 | Status | The ledger of the autonomous implementation run ([autonomous-run.md](autonomous-run.md)). The orchestrator keeps it current and commits it by path while no lead runs (autonomous-run.md §5); a lead commits its own §3 and §4 rows, and a pending §2 row, with its first commit |
 | Branch | `unified-api-impl` on `sakoram` |
-| Base commit | (the orchestrator records `git rev-parse HEAD` here when R0 starts) |
+| Base commit | `a6fc9093cb161769d3c506beb956f18321413f0b` (R0 started 2026-10-20), on `main` at `2fe5599f`; `lib/` and `include/` are unchanged since `770294a1` |
 
 On every resume: read [autonomous-run.md](autonomous-run.md), this file, the current milestone's
 ledger and `git log --oneline -20`, then continue (autonomous-run.md §7).
@@ -20,6 +20,10 @@ base commit.
 | 2026-10-16 | preparation: tests at `770294a1` (the library is unchanged since) | `./build.sh` green after `build/` was moved back to the `/usr/local` prefix; `./build.sh unit` 959 passed, 1 skipped; KahawaiTest `St20p*` 44/44 on the E830 (`0000:15:01.0`/`.1`) and on the E810 (`0000:c9:01.0`/`.1`) |
 | 2026-10-16 | preparation: host | patched ICE `Kahawai_2.6.7`; MtlManager of this tree running; the stale `st41_api.h` removed from `/usr/local/include/mtl` and `.local_install/mtl/include/mtl`; both install trees built from `770294a1` (`build-both.sh`) |
 | 2026-10-20 | guard check at `b38e258c` (autonomous-run.md §9) | **failed; the run stopped before R0.** `env \| wc -l` ran instead of being blocked: `.github/claude/settings.local.json` is missing, so step 1 of §9 was not done (see below) |
+| 2026-10-20 | guard check repeated, after the maintainer asked for a restart | **passed.** The candidate settings are installed and loaded live: `env \| wc -l`, a subagent's `git push origin x` and a Write into the hooks directory are blocked; `git status`, a `for` loop, `sudo -n true` and `hugepages_get` run |
+| 2026-10-20 | `test-permissions.sh` (its log is in the run's `logs/`) | 10–16 denied as expected. Of 1–9, four are denied under `dontAsk`: an `&&` compound, a `for` loop, a `$(…)` substitution, a Write under `build/`. Such calls are rephrased (autonomous-run.md §5 "A denied call") |
+| 2026-10-20 | session mode | the orchestrator's session kept bypass permissions mode (it was not relaunched): the deny rules and the guard hook hold, the allow list does not restrict it |
+| 2026-10-20 | host before R0 (`mtl-system-admin`, read-only) | ICE `Kahawai_2.6.7`; 1024 × 2 MB hugepages on each node; 12 VFs per NIC on vfio-pci; MtlManager running; `ptp4l`/`phc2sys` not running. The installed DPDK is `26.03.91`, `versions.env` pins `26.07`: the preparation baseline was green on it, kept as is |
 
 The guard check of 2026-10-20: without `settings.local.json` the session ran in bypass
 permissions mode, not `dontAsk`, and the `PreToolUse` guard (`.git/autonomous-run/bash-guard.py`,
@@ -38,7 +42,7 @@ the one in Needs is done or done with exceptions.
 
 | Milestone | Ledger | Needs | State | Lead agent | Exit commit | Exit evidence |
 |---|---|---|---|---|---|---|
-| R0 (re-pin to the new base, autonomous-run.md §1) | this file | — | todo | | | |
+| R0 (re-pin to the new base, autonomous-run.md §1) | this file | — | in progress | | | |
 | L0 (the legacy baseline, autonomous-run.md §1) | this file, §1 | R0 | todo | | | |
 | MS1 | [ms1-status.md](ms1-status.md) | L0 | todo | | | |
 | MS2a | ms2a-status.md | MS1 | todo | | | |
