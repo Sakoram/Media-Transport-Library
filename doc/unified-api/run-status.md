@@ -24,6 +24,7 @@ base commit.
 | 2026-10-20 | `test-permissions.sh` (its log is in the run's `logs/`) | 10–16 denied as expected. Of 1–9, four are denied under `dontAsk`: an `&&` compound, a `for` loop, a `$(…)` substitution, a Write under `build/`. Such calls are rephrased (autonomous-run.md §5 "A denied call") |
 | 2026-10-20 | session mode | the orchestrator's session kept bypass permissions mode (it was not relaunched): the deny rules and the guard hook hold, the allow list does not restrict it |
 | 2026-10-20 | host before R0 (`mtl-system-admin`, read-only) | ICE `Kahawai_2.6.7`; 1024 × 2 MB hugepages on each node; 12 VFs per NIC on vfio-pci; MtlManager running; `ptp4l`/`phc2sys` not running. The installed DPDK is `26.03.91`, `versions.env` pins `26.07`: the preparation baseline was green on it, kept as is |
+| 2026-10-20 | L0: the queue-rate check of D-253 (autonomous-run.md §8), E830 `0000:15:01.0`/`.1`, binaries of `770294a1` | **a VF re-create lifts a kept rate; the host keeps DPDK `26.03.91`.** TSC red at 27.7 fps after the RL kill, green at 50.06 and 60.04 fps after `nic_create_vf` on `0000:15:00.0` (see below) |
 
 The guard check of 2026-10-20: without `settings.local.json` the session ran in bypass
 permissions mode, not `dontAsk`, and the `PreToolUse` guard (`.git/autonomous-run/bash-guard.py`,
@@ -34,6 +35,14 @@ present) was not enabled. The git hooks `commit-msg`, `pre-commit`, `pre-merge-c
 `.github/claude/settings.local.json`, run `test-permissions.sh`, and start `claude` again with the
 orchestrator prompt of autonomous-run.md §9.
 
+The queue-rate check of L0: kills of the RL run at 15 s and at 9 s left only the rates its own
+sessions had trained (q1 2.04, q2 2.45 Gbit/s), which the TSC run of the same case fits under, so
+that run stayed green. Killed right after both ports logged `tx pacing ratelimit`, with every TX
+queue still on the init shaper (134217728 B/s, by
+`/home/labrat/wip/unified-api-impl/l0/rl-kill-after-init.sh`), the TSC run was red at 27.7 fps of
+50 and 59.94 (1958 Mb/s). After `nic_create_vf` on `0000:15:00.0` (6 VFs) it was green at 50.06 and
+60.04 fps (3912 Mb/s). The logs are `/home/labrat/wip/unified-api-impl/logs/l0-qr-*.log`.
+
 ## 2. Milestones
 
 States: todo, in progress, exit review, done, done with exceptions (autonomous-run.md §4). The
@@ -43,7 +52,7 @@ the one in Needs is done or done with exceptions.
 | Milestone | Ledger | Needs | State | Lead agent | Exit commit | Exit evidence |
 |---|---|---|---|---|---|---|
 | R0 (re-pin to the new base, autonomous-run.md §1) | this file | — | done | `a382f8ddd6f259ae0` | `e3bb41c2` | 10 docs commits `1f600403..e3bb41c2`; `sketch/check.sh` OK; `mtl-reviewer` (Opus) over the range: 3 MAJOR and 12 MINOR fixed, then APPROVE (`wip/unified-api-impl/r0/review-r0.md`); D-246–D-253 in §3 |
-| L0 (the legacy baseline, autonomous-run.md §1) | this file, §1 | R0 | in progress | | | |
+| L0 (the legacy baseline, autonomous-run.md §1) | this file, §1 | R0 | in progress | `a1d4fafb65f9a1f51` | | |
 | MS1 | [ms1-status.md](ms1-status.md) | L0 | todo | | | |
 | MS2a | ms2a-status.md | MS1 | todo | | | |
 | MS2b | ms2b-status.md | MS2a | todo | | | |

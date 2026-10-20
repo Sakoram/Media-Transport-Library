@@ -323,12 +323,14 @@ is re-run after `nic_create_vf` (the PF's `bdf`, `vf_count` 6) re-creates that P
 nothing uses them; it counts only if it is red again, and the milestone ledger lists each such
 re-run. A TSC measurement (S0, S1) runs on re-created VFs whenever an RL process on them ended
 without `mtl_uninit` since their creation. L0 first checks that a re-create lifts a kept rate, on
-the E830 pair: `sudo timeout -s KILL 15 build/tests/KahawaiTest --p_port 0000:15:01.0 --r_port
-0000:15:01.1 --auto_start_stop --pacing_way auto
---gtest_filter=St20p.rx_ext_digest_1080p_no_convert_s2` (killed while it runs, else its clean exit
-resets the rates), then the same case with `--pacing_way tsc` (expected red near half rate; if not
-capped, repeat with an earlier kill), `nic_create_vf` on `0000:15:00.0`, and the TSC run again
-(expected green). The result goes to [run-status.md](run-status.md) §1. If the re-create does not
+the E830 pair: `sudo build/tests/KahawaiTest --p_port 0000:15:01.0 --r_port 0000:15:01.1
+--auto_start_stop --pacing_way auto --log_level info
+--gtest_filter=St20p.rx_ext_digest_1080p_no_convert_s2`, SIGKILLed as soon as both ports log `tx
+pacing ratelimit` (`/home/labrat/wip/unified-api-impl/l0/rl-kill-after-init.sh`; a clean exit
+resets the rates, and a later kill leaves only the rates the case's sessions trained, which its TSC
+run fits under), then the same case with `--pacing_way tsc` (expected red near half rate),
+`nic_create_vf` on `0000:15:00.0`, and the TSC run again (expected green). Done at L0: red, then
+green ([run-status.md](run-status.md) §1). If the re-create does not
 lift the rate, the lead moves the host to `versions.env`'s DPDK (`mtl-system-admin` `dpdk_build`,
 then `build-both.sh` and a MtlManager restart) before L0 and records it in
 [run-status.md](run-status.md) §1. Neither step reboots or reloads a driver.
