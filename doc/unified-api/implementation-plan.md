@@ -1442,7 +1442,8 @@ following their video, sample-accurate audio, the step rule, AUTO's move to a PH
   `rvs_pkt_rx_tasklet_handler`; `CMD_TIMEOUT`; `mtl_session_discard`; the "last packet handed" hook
   for copy mode (`st_tx_video_session.c:2147-2151`, `:2672-2676`). An RX hand-back acknowledged
   at `tick` fences the streaming stores first (D-250): `St20RxNtFenceTest.HandBackFencesBeforeAck`
-  on E8's fence counter asserts no unfenced hand-over.
+  on the fence counter asserts no unfenced hand-over (the counter comes with E8 or with this task,
+  whichever lands first).
 - **Rows (slice):** `MTL_UNIT_ROWS` TX (re-submit raises `progress`, `used` counts rows and 0 is
   legal) and RX (`mtl_rx_wait_rows`, `MTL_OPT_RX_ROWS_STEP`); the unit deadline is
   `mtl_tx_row_deadline(k, 0)`; an engine return code from `query_frame_lines_ready` that ends a
