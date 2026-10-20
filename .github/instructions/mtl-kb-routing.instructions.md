@@ -20,6 +20,7 @@ The [MTL knowledge base](../copilot-docs/mtl-knowledge-base.md) is the comprehen
 | Session create/destroy, pipeline, TX/RX data flow, RTCP | [§6 Session Lifecycle & Data Flow](../copilot-docs/mtl-knowledge-base.md) |
 | DPDK queues, mbufs, flow rules, device init | [§7 DPDK Usage Patterns](../copilot-docs/mtl-knowledge-base.md) |
 | Tests, gtest suites, fuzz targets, CI | [§8 Testing](../copilot-docs/mtl-knowledge-base.md) |
+| Unified API: `lib/src/st2110/core/`, `lib/src/unified/`, `include/mtl/experimental/` | [core.md](../../doc/unified-api/core.md), [engine.md](../../doc/unified-api/engine.md) §1 and [contract.md](../../doc/unified-api/contract.md) §1 |
 
 ## Knowledge Base Workflow
 

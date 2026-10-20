@@ -46,7 +46,7 @@ Without this step, MCP tool calls will fail with "Cannot read properties of unde
 2. **Probe** — `system_status` for full readiness overview
 3. **Setup** — `setup_after_reboot_auto` handles hugepages + CPU governor + VFs + MtlManager
 4. **Build for tests** — `build_mtl(mode="debugonly")` so simulate-loss / redundancy drop paths are compiled in (never `release` when the goal is running tests)
-5. **Test** — `run_gtest(gtest_filter="St20p*")` for a smoke test
+5. **Test** — `run_gtest(gtest_filter="St20p*")` for a smoke test. `run_gtest` also takes `level`, `pacing_way`, whitelisted `extra_args` (`--rss_mode`, `--iova_mode`, `--multi_src_port`, `--p_sip`, …) and `kernel:lo` ports with `--p_sip`; `run_gtest`, `run_noctx_tests` and `run_noctx_pf_tests` take `binary="unified"` for `UnifiedKahawaiTest` (default `legacy`, never a fallback)
 6. **Report** — end with a status summary showing DPDK, ICE, VFs, MtlManager, and test results
 
 For full tool inventory, decision trees (reboot, crash, build failure), and key facts,

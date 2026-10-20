@@ -119,6 +119,11 @@ else
 	err "Step 3/5: $LOCAL_PREFIX/bin/{MtlManager,RxTxApp} missing after build"
 	exit 1
 fi
+if [[ -x "$LOCAL_PREFIX/bin/UnifiedRxTxApp" ]]; then
+	ok "Step 3/5: UnifiedRxTxApp present under $LOCAL_PREFIX/bin"
+else
+	log "Step 3/5: $LOCAL_PREFIX/bin/UnifiedRxTxApp missing (only needed for application=rxtxapp_unified tests)"
+fi
 
 # -------------------- Step 4: hugepages --------------------
 log "Step 4/5: hugepages"
