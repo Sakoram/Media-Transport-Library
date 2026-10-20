@@ -93,7 +93,7 @@ flowchart TB
 | **MS4a2** ANC and fastmeta | ANC (st40p re-based) and fastmeta (the fast metadata mode of the same ST40 engine work, D-247) at any frame rate, DSCP on their bindings, their `UnifiedRxTxApp` kinds and `UnifiedKahawaiTest` cases, EBU LIST (tasks N1–N8, N4f, N5f, N7f, §6.3); its engine, binding and app files are disjoint from MS4a1's, so it runs beside MS4a1 | |
 | **MS4a2** ANC and fastmeta, continued | | month 5 (run after MS4a1, it moves MS4b and later by about 5 weeks) |
 | **MS4b** compressed video and plugins | cvideo (st22p re-based; codec plugins on the transform state) and its rates (JPEG XS n and n·1000/1001), cvideo REPEAT (JPEG XS), plugin ABI v2, `mtl_convert`'s conversions, its CHECK since MS2a (§6.3) | month 6 |
-| **MS5** packets and operators | packet units on every essence over today's RTP paths (one shared chunk expander, PE1–PE8), the generic `MTL_RTP` essence and ST 2022-6 (PE7); E5a (linear NL and W, D-143); `mtl_session_update` at an instant (legs, launch delay); RTCP sender reports on TX (their names leave `MTL_LATER`); the link monitor, capacity query, manager reconnect (§6.4) | month 7 |
+| **MS5** packets and operators | packet units on every essence over today's RTP paths (one shared chunk expander, PE1–PE7), the generic `MTL_RTP` essence and ST 2022-6 (PE7); E5a (linear NL and W, D-143); `mtl_session_update` at an instant (legs, launch delay); RTCP sender reports on TX (their names leave `MTL_LATER`); the link monitor, capacity query, manager reconnect (§6.4) | month 7 |
 | **MS6** synchronisation and the ecosystem | start arrays, ANC and fastmeta following their video, sample-accurate audio, E5b–E13, the published time base with FREERUN (E9; its name leaves `MTL_LATER`); recovery on library workers; the GStreamer, OBS, Python and Rust ports and the rest of the FFmpeg plugin (§6.5) | months 8–9 |
 | **MS7** freeze and hide | the external review with the named consumers; the `MTL_1.0` freeze; the hiding stages F, F+1, F+2 (D-83) (§6.6) | month 10, then the deprecation releases at the targets of abi.md §7 |
 | Phase 7 | NMOS extras, SDP, IPMX timing and the RTCP MIB, encryption, PEP ([nmos-ipmx.md](nmos-ipmx.md)), declared under `MTL_LATER` until then (D-98); a Phase 7 name leaves `MTL_LATER` in the milestone that implements it (RTCP sender reports MS5, FREERUN MS6) | after MS7 |
@@ -700,7 +700,10 @@ mutants. `run_models.py` also runs the ring models of `design/models/` (`ring_bo
 tables as its expected results, `pin_ring.py`'s mixed `BEHIND` rows of D-212 included. The ring
 models are in `design/models/` already, so M0 adds only their entries (about 40 lines [I]);
 `w_noe2.py` is the one home of the check that a W store skipping E2 loses a wake-up (D-209,
-G-143), so `final_model.py` gets no copy of it as a mutant. C1w copies the result.
+G-143), so `final_model.py` gets no copy of it as a mutant. `legacy_wake.py` models D-246's LW1 and
+LW2, so M0 adds both labels to `final_model.py`'s `NOT_MODELLED` list, in the commit that makes the
+models pass the repository's Python lint (black, flake8, ruff); M0's exit (`check_labels.py`)
+cannot pass before ([design/wait-tests.md](design/wait-tests.md) §1.2). C1w copies the result.
 
 | Design to read | Code to open first |
 |---|---|
@@ -840,6 +843,18 @@ into I1, its first user, with its exit.
 **E1**: E1a–E1d are written in order and reviewed together as one unit, the series E1 (§5.8);
 "E1" elsewhere means the series: B1 and B2 depend on E1a and E1c, A1 on E1d.
 
+**E1a** starts from D-248's written-out test (ms1-status.md, the E1 row, points at it):
+`St20TxFrameCompletionTest.*` in `tests/unit/session/st20_tx/frame_completion_test.cpp`, with its
+harness additions. `LastFreeDuringRecoveryReportsFrameOnce` and
+`RecoveryDuringFreeCallbackReportsFrameOnce` pin MF1's claim (SF-39): recovery and the last free
+complete an in-flight legacy frame once, in either order. `ChainFrameNotDoneBeforeItsLastPacket`
+pins MF7: a chain-mode frame does not complete while the builder holds it.
+`CoreRecoveryRecordsVerdictLastFreeReports` and `CoreRecoveryMidFrameDropsTheBuilderReference` pin
+the verdict: on a core session recovery records it and reports nothing, and the last reference,
+also the builder's own in the middle of a frame, reports the frame once. Gate 2: four cases fail by
+assertion on today's code, and `RecoveryDuringFreeCallbackReportsFrameOnce` is the green guard. Its
+model is `design/models/tx_completion.py`.
+
 **E1d** gains the wrapper's lifetime (contract.md §2.8): the `impl->wrappers` count
 under `impl->wrapper_mutex`; `mtl_uninit` `-EBUSY` while it is non-zero; about 10 + 20 lines; A1
 calls the increment and the decrement.
@@ -965,7 +980,13 @@ B1's `sc.tsmode` and its grid's TAI parity (1 ns tolerance); `MTL_TXR_DEFERRED` 
 `SNAP_COLLISION` are `st_core_admit`'s (C2). B1's `info.internal_bytes` includes the TX
 mempools and the core's allocations (`internal_bytes_counts_pools`: the reported value equals
 the pools the harness created plus the core's allocations, and the query is within 1 % of it).
-B1 adds `ready_delay_video_grid` (UB, 30 lines, G-151).
+B1 adds `ready_delay_video_grid` (UB, 30 lines, G-151). B1's DSCP on the kernel-socket backend
+(D-249) has a U case beside `MtDpSocketTxTest.GsoPacketsGoToTheirHeaderDestination` in
+`tests/unit/datapath/mt_dp_socket_tx_test.cpp` (`MtDpSocketTxTest.UnifiedQueueSetsTosAndTtl`,
+name indicative): a TX socket entry with the unified flow flag, `dscp` 34 and `ttl` 8, to a
+multicast and to a unicast destination; `getsockopt` on every thread socket gives `IP_TOS` 0x88,
+`IP_TTL` 8 and `IP_MULTICAST_TTL` 8, and a legacy entry keeps 0, 64 and 1. It is red on today's
+code, which gives 0, 64 and 1 for the unified entry too.
 
 | Design to read | Code to open first |
 |---|---|
@@ -1419,7 +1440,9 @@ following their video, sample-accurate audio, the step rule, AUTO's move to a PH
 - **Commands:** the `tick` hook in each video tasklet handler with `ctl`/`ack` (D-103): TX in
   `tvs_tasklet_handler` (the builder; the transmitter calls nothing), RX in
   `rvs_pkt_rx_tasklet_handler`; `CMD_TIMEOUT`; `mtl_session_discard`; the "last packet handed" hook
-  for copy mode (`st_tx_video_session.c:2147-2151`, `:2672-2676`).
+  for copy mode (`st_tx_video_session.c:2147-2151`, `:2672-2676`). An RX hand-back acknowledged
+  at `tick` fences the streaming stores first (D-250): `St20RxNtFenceTest.HandBackFencesBeforeAck`
+  on E8's fence counter asserts no unfenced hand-over.
 - **Rows (slice):** `MTL_UNIT_ROWS` TX (re-submit raises `progress`, `used` counts rows and 0 is
   legal) and RX (`mtl_rx_wait_rows`, `MTL_OPT_RX_ROWS_STEP`); the unit deadline is
   `mtl_tx_row_deadline(k, 0)`; an engine return code from `query_frame_lines_ready` that ends a
@@ -1441,7 +1464,17 @@ following their video, sample-accurate audio, the step rule, AUTO's move to a PH
   fastmeta: zero; ANC units are never filled; legacy sessions keep today's behaviour." Then the RX
   due time and
   force-complete (E8 deadline part, G-82), `missed_before`, `MTL_SESSION_RX_LATEST`, the per-unit
-  timing in `mtl_rx_get_detail`.
+  timing in `mtl_rx_get_detail`. E8 first pins today's fences of the streaming stores (D-250): in
+  `tests/unit/session/st20_harness.c`, `_mm_sfence()` defined as a counter before the session's
+  `#include`, and the harness's frame, ST22 and slice hooks count a hand-over with no fence since
+  the last; `St20RxNtFenceTest.CompleteFrameFencesBeforeHandover`,
+  `EvictedFrameFencesBeforeHandover`, `DmaDrainFencesBeforeHandover` and an ST22 case assert 0
+  unfenced hand-overs, green today and each red with its notify's fence deleted. E8 adds
+  `DueTimeForceCompleteFencesBeforePublish` and `DrainForceCompleteFencesBeforePublish` (the counter
+  at the PUBLISHED store), and `St20RxDmaTest.DueTimeWaitsForStalledDmaWithoutSpinning` (D-251;
+  `st20/dma_test.cpp`): with copies pending and the fake engine stalled, 100 passes past the due
+  time poll the DMA at most once each, `ut20_dma_flush_timeouts` stays 0 and nothing is published;
+  once the engine completes, one pass publishes; red if the tick calls `rv_dma_flush`.
 - **Instance:** `mtl_instance_open` on PCI BDFs (with `PTP_BUILTIN`) and on `native_af_xdp:`, with
   asynchronous signals blocked around `rte_eal_init` and in MTL's threads; `MTL_INSTANCE_SHARED`
   (U-004, G-77) with the join rule of contract.md §2.3 (port subsets with the instance's indices)
@@ -1671,7 +1704,7 @@ metadata acceptance case exists since `30ce608b`); RxTxApp kinds `st40p` and `"a
 directories on both applications. Its files (the ANC and fastmeta bindings, the st40 engine,
 `st40_pipeline_*`) are disjoint from MS4a1's, so it runs beside MS4a1 (the shared tables, `.def`
 rows, `parse_json.c` and the sample list, take milestone order); run after it, MS4b and later move
-by about 4 weeks. Until MS4a2 lands, st40p runs on its legacy path with only SF-87 and SF-88. Each
+by about 5 weeks. Until MS4a2 lands, st40p runs on its legacy path with only SF-87 and SF-88. Each
 task is one review unit (§5.8), each commit under the commit cap (D-107) with its tests, through
 `mtl-reviewer`; N6a and N6b split the st40p rewrite (1 570 lines, deletions counted) under the cap:
 
@@ -1682,7 +1715,7 @@ task is one review unit (§5.8), each commit under the commit cap (D-107) with i
 | N3 | engine RX: the unit sink, payload copy and records in sequence order, the sized bitmap, the gap wait, drops, the PsF end rule, no `udw_buf`; RXHDR and the RX timed create for both formats; the fast metadata mode ([engine.md](engine.md) E12 detail, D-247) | N1 | 410 + 600 | UB: G-118 (wire part); G-167 (RX), `St40RxFmdSinkTest.*`; `St40RxFmdTest.*` unchanged |
 | N4 | the TX binding and API shell: config and create checks (the window check), the slot layouts and wire areas, submit (check and encode in one pass, launch offsets), pick-up and the late policy, the keep-alive cursor, results, info and requirements; `anc.max_packets` (below) | N2, core MS1–MS3 | 750 + 550 | U: G-119, G-120, `UnifiedAnc.*` (below); UB: G-61, G-116, G-117 |
 | N5 | the RX binding: the sink over core slots, publication, dequeue decode, flags and status on the finished unit, `mtl_rx_detail` counts; the fuzz harness `tests/fuzz/unified/anc_rfc8331_fuzz.c` and its corpus replayed by a `UnifiedUnitTest` case | N3, N4 | 500 + 550 | U and UB: G-118 at the API; the fuzz corpus replay green |
-| N4f | the fastmeta TX binding (D-247): config and create checks (DIT, K, PT, SKIP refused, `buffer_capacity_bytes` at most `sc.max_udp_payload` − 16, again at a `MTL_UPDATE_MEDIA`), the slot layout, `get_next_frame` on today's frame path (frame 0 with the slot's one data item, the carrier 1 with `data_size` 0), pick-up and the late policy, the 450 ms keep-alive cursor, results, | | | |
+| N4f | the fastmeta TX binding (D-247): config and create checks (DIT, K, PT, SKIP refused, `buffer_capacity_bytes` within the bound of `mtl.h`, again at a `MTL_UPDATE_MEDIA`), the slot layout, `get_next_frame` on today's frame path (frame 0 with the slot's one data item, the carrier 1 with `data_size` 0), pick-up and the late policy, the 450 ms keep-alive cursor, results, | | | |
 | N4f, continued | info and requirements, its FLOWS `tick` on N4's ST40 TX tick, `fastmeta.items`, `fastmeta.keepalives` | N2, N4, N5 | 300 + 400 | U: `UnifiedFastmeta.Tx*`; UB: G-61 (fast metadata), G-167 (TX), the `St40TxFmdTaskletTest` pins of D-247 |
 | N5f | the fastmeta RX binding: the sink's fast metadata mode over core slots, publication, `RX_LATEST`, the due time and discard; | | | |
 | N5f, continued | dequeue walks the data items (length not 0, inside the packet), applies `MTL_FASTMETA_RX_MATCH_DIT` / `_K`, copies the contents in sequence order, `used` 0 for a keep-alive, INCOMPLETE and the zero fill, `mtl_rx_detail` counts, `rx.pkts_rejected{cause=fmd_filter}` | N3, N5, N4f | 300 + 400 | U and UB: `UnifiedFastmetaRxUb.*`, G-167 at the API |
@@ -1712,6 +1745,19 @@ function: no EAL"), and N5 adds it to the first paragraph of `tests/doc/fuzz/ind
 that page's harness count. Its libFuzzer run (`fuzz.sh build`, `FUZZ_TIME=60 fuzz.sh run`) needs a
 clang that builds `lib/`, not clang 18 (T-115).
 
+The fast metadata tasks copy D-247's tests. N3's `St40RxFmdSinkTest.*`
+(`tests/unit/session/st40/fmd_unit_sink_test.cpp`, with `ut40_sink_*` in `st40_harness.{c,h}`)
+include `SenderRestartWithOlderTimestampsIsFollowed` and `ThirdTimestampPublishesTheOldestAsIs`.
+N4f appends `St40TxFmdTaskletTest.MaxItemUnitIsOnePacketWithinNetworkCompatibilityModel` and
+`.EmptyUnitIsTheKeepAlivePacket` to `tests/unit/session/st40_tx/fmd_build_packet_test.cpp`
+(regression pins, green today) and writes `tests/unit/unified/fastmeta_tx_test.cpp`:
+`UnifiedFastmeta.TxCapacityDefaultIsOneItem`, `.TxCapacityAboveOneItemIsInvalid` (field
+`fastmeta.buffer_capacity_bytes`), `.TxCapacityFollowsMaxUdpPayload` (at a `sc.max_udp_payload`
+of 1000, the bound of `mtl.h` is valid and one byte more is not), `.RxCapacityDefault64KiB`,
+`.TxWriteSplitsAtOneItem` and `.TxSkipRefused`. N5f copies `UnifiedFastmetaRxUb.*` to
+`tests/unit/unified/fastmeta_rx_ub_test.cpp`, its comments and messages restated in D-247's unit-end
+rule.
+
 **MS4b**: cvideo (st22p re-based; its ledger rows first; ST 2110-22 codec plugins on the transform state, the
 `video.*` keys apply; E10: ST22 CBR and the synchronous oversize check), cvideo REPEAT (JPEG XS,
 D-239), plugin ABI v2 with `mtl_plugin_open` (the `latency_ns` parameter of `create_session`, the
@@ -1725,7 +1771,7 @@ Exit: G-45 (one verb sequence for every essence × direction).
 
 Packet units on every essence over today's RTP paths: one shared chunk expander on the TX
 tasklet (header mbufs plus extbuf attaches, one completion per chunk; PE1), copy RX at dequeue
-from the engine's RTP ring, PE2–PE8; the generic `MTL_RTP` essence and ST 2022-6 with the packet
+from the engine's RTP ring, PE2–PE7; the generic `MTL_RTP` essence and ST 2022-6 with the packet
 size from the MTU (PE7; 2022-6 cannot be sent today, its 1396–1456 B packets exceed
 `MTL_PKT_MAX_RTP_BYTES` = 1352, `include/mtl_api.h:89`, SF-77) and E5a: the linear TRS for
 2022-6 (ST 2022-8 §6) and for NL and W on the frame path, one implementation; the sender grants
@@ -1735,8 +1781,14 @@ launch delay at a boundary (D-237, G-162); the RTP sequence seed of OI-62; MS5 s
 RTCP sender reports on TX (driven by options, the library builds the Info Block; their names leave `MTL_LATER`), the link
 monitor, leg admin state, `MTL_QUERY_CHECK_CAPACITY`, MtlManager reconnect. `UnifiedRxTxApp`
 `"type": "rtp"`, the 61 RTP-level gtest sites and pcap replay on the
-unified path. Exit: G-PKT-1…7, the scheduled-update gtests, a 2022-6 stream accepted by a
-third-party receiver.
+unified path. The kernel-socket queue swap of a running FLOWS update ([core.md](core.md) §5.4,
+D-249) has a `UnifiedKahawaiTest` case on `kernel:lo`, `KernelSocketTxFlowsUpdateRunning`: a running
+TX to port 20000 with `dscp` 0 is updated to port 20002 with `dscp` 34; every packet from the
+APPLIED first index on arrives on 20002 with TOS 0x88, none on 20000, every earlier one on 20000
+with TOS 0; again above the per-thread rate, with the socket threads on. A UB case pins the NACK
+flows (SF-37): after a FLOWS port change a NACK to the new `udp_port` + 1 reaches
+`mt_rtcp_tx_parse_rtcp_packet`, one to the old port does not. Exit: G-PKT-1…7, the scheduled-update
+gtests, a 2022-6 stream accepted by a third-party receiver.
 
 ### 6.5 MS6: synchronisation and the ecosystem
 
@@ -1793,6 +1845,14 @@ path, targeted to finish by the MS3 exit. EK1, EK2, EK6 and EK7 come first: they
 use-after-free, CPU theft between pods and a crash loop on a valid configuration. The items that
 need the unified API stay with their milestone: EK20 (the handle table) in task C1a, EK18 (the
 non-blocking open) with the NoCtx ports of wave 4 and EK21 (lossless shutdown) in MS3.
+
+EK5's single-instance lock and group mode (D-252) add two cases to
+`tests/acceptance/tests/single/manager/test_manager_runtime_files.py`.
+`test_second_manager_keeps_the_live_socket`: a second manager under the module fixtures exits
+non-zero (not 124, the timeout), the socket still exists and accepts, and a SIGTERM of the first
+leaves no socket; red today, where the second binds and runs to the timeout. A case parametrized
+with the group option asserts `"660 socket"`, the group, and that uid 65534 without the group
+cannot connect. `test_manager_runtime_files_modes` (main's `0666`) stays unchanged.
 
 ## 7. Engine fixes by task
 

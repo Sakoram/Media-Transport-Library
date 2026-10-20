@@ -528,7 +528,7 @@ Rows too long for the table, continued:
   maintainer
 - **D-247**, continued: TX: a frame unit is one data item, sent as one RTP packet on today's frame
   path (`get_next_frame`, `st40_frame.data`/`data_size`; `used` 0 the zero-item keep-alive), so TX
-  `buffer_capacity_bytes` is at most `sc.max_udp_payload` − 16 (1436 B at 1452), 0 = that (RX stays
+  `buffer_capacity_bytes` is at most what one packet holds (the bound: `mtl.h`), 0 = that (RX stays
   0 = 64 KiB); why: ST 2110-41 §7 is one bucket per stream, so several packets per unit leave only
   four back to back and then one per 1.25 ms carried across units, which spreads a 64 KiB unit over
   52.5 ms, past its frame and the receiver's due time, while the old text's per-unit reading breaks
@@ -572,8 +572,8 @@ Rows too long for the table, continued:
   autonomous run (2026-10-20, D-245); to confirm by the maintainer
 - **D-251**, continued: That bounded poll (`f64db786a`, once per newer RTP timestamp, SF-93) stays
   legacy's one deliberate spin, which core sessions with `MTL_OPT_DMA` inherit at a new frame; no
-  §8.4 load runs RX DMA, so no budget changes. Taken in the autonomous run (2026-10-20, D-245); to
-  confirm by the maintainer
+  load of implementation-plan.md §8.4 runs RX DMA, so no budget changes. Taken in the autonomous run
+  (2026-10-20, D-245); to confirm by the maintainer
 - **D-252**, continued: The socket is `0660` with a group only when the operator names one (the
   DaemonSet does), else main's `0666` (`04138ad2c`, pinned by the smoke test
   `test_manager_runtime_files.py`), so legacy clients of any user keep connecting. Amends

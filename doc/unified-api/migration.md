@@ -85,7 +85,8 @@ with the unified one.
   or shut down the instance (`-MTL_EDEADLK`).
 - **Call classes**: CP (may allocate and block), DP (O(1), no allocation, no lock a tasklet takes,
   no logging, no syscall except one wake when it makes a target ready for a sleeper), DPC (copy or
-  conversion in the caller), WT (waits; DP with timeout 0),
+  conversion in the caller), WT (waits; DP with timeout 0, except a legacy `BLOCK_GET` get, whose
+  wait also runs at timeout 0: LW2 of [wait-protocol.md](wait-protocol.md) §3),
   AS (async-signal-safe). Debug builds enforce them (from MS3, D-05).
 - **Blocking.** `*_FLAG_BLOCK_GET` and `*_set_block_timeout()` become the `timeout_ns` argument (0 =
   do not wait, `MTL_FOREVER`); `*_wake_block()` becomes `mtl_session_interrupt(s, 1)`, sticky until
@@ -571,7 +572,7 @@ with it (`st_tx_ancillary_session.c:2268-2271`).
 | `fmd_k_bit` (TX only) | `f.k_bit` | same |
 | RX DIT / K filter: none since `88d47ac83` (the `st41_rx_ops` one went with st41) | `MTL_FASTMETA_RX_MATCH_DIT`, `_MATCH_K` in `f.fastmeta_flags` | set them to get a filter |
 | `ST40_TX_FLAG_FAST_METADATA` (TX bit 9), `ST40_RX_FLAG_FAST_METADATA` (RX bit 3) | `sc.essence = MTL_FASTMETA` | the flag is the essence |
-| TX frame level: `st40_frame.data` / `data_size`, one data item of at most 1436 B per frame (a larger one handed back unsent) | `u.plane[0]`, `u.used`; TX `buffer_capacity_bytes` at most `sc.max_udp_payload` − 16 (D-247) | same bytes; a larger `used` is `-MTL_EINVAL` at submit |
+| TX frame level: `st40_frame.data` / `data_size`, one data item of at most 1436 B per frame (a larger one handed back unsent) | `u.plane[0]`, `u.used`; TX `buffer_capacity_bytes` at most one packet's data item (the bound of `mtl.h`, D-247) | same bytes; a larger `used` is `-MTL_EINVAL` at submit |
 | RX `ST40_TYPE_RTP_LEVEL` only (frame level refused, `st_rx_ancillary_session.c:1507-1510`) | frame units (new, MS4a2), or `MTL_UNIT_PACKETS` for the packets (MS5, U-345) | frame RX is new |
 | `ST40_TX_FLAG_SPLIT_ANC_BY_PKT` with the mode (refused, `st_tx_ancillary_session.c:2268-2271`) | — | not in the unified API: every TX unit is one packet |
 

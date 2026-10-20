@@ -145,7 +145,8 @@ FLUSH(Lp): F1-F8 of §4 with D-142's bound, and
 F6  an object: F = xchg(fired(entry(i)), 0, acquire); a queue: F = xchg(owed(entry(i)), 0)
 F7  if (F) { if (WAKE_NOW(entry(i), F) > 0) n++; else z++ }
 
-WT(o, M, timeout): every data call with timeout != 0; L = lanes(M)
+WT(o, M, timeout): every data call with timeout != 0, and the legacy get of LW2 at timeout 0 too;
+    L = lanes(M)
 T1  deadline = timeout == MTL_FOREVER ? NONE : now(CLOCK_MONOTONIC) + timeout; enter;
     ST_CORE_LEGACY_WAKE_EDGE: k0 = load(lkick(o), relaxed)
 T2  e = load(ec(o), acquire)        (mtl_rx_wait_rows: also p = load(progress, acquire), RW2)

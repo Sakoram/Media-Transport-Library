@@ -820,7 +820,7 @@ budgets [§8.4](implementation-plan.md#84-performance-budgets), test isolation
 - **G-167** UB, U; P; MS4a2. Fast metadata (D-247). TX: a unit of `used` bytes leaves as one RTP
   packet of one data item (the session's type and K bit, the length in words, zero padding, marker
   0, UDP ≤ 1460 B at the default `sc.max_udp_payload`), `used` 0 as the 12-byte zero-item packet; a
-  `buffer_capacity_bytes` above `sc.max_udp_payload` − 16 is `-MTL_EINVAL`; the launches pass the
+  `buffer_capacity_bytes` above the bound of `mtl.h` is `-MTL_EINVAL`; the launches pass the
   ST 2110-41 §7 checker. RX: the packets of one RTP timestamp land in one core slot in sequence
   order, each ST 2022-7 copy once; a newer timestamp ends the unit, with two legs after a sequence
   gap at most `rx.skew_budget_ns` later; at most two units in flight; a sender restart is followed

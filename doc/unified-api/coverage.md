@@ -138,7 +138,7 @@ because the pipeline ops and frame structs embed these types (§4).
 
 | U-ID | Legacy | Unified home | When | Notes |
 |---|---|---|---|---|
-| U-075 | shared TX queue: `MTL_FLAG_SHARED_TX_QUEUE` | `MTL_OPT_TX_QUEUE = MTL_TXQ_SHARED` (`session.tx_queue`) on the instance: the default of its sessions (contract.md §12.4); a session's own wins | MS1 | Co; SMP 1, RXTX 1, RS 1. Today it forces TSC pacing for the whole port (`mt_dev.c:1476-1480`) |
+| U-075 | shared TX queue: `MTL_FLAG_SHARED_TX_QUEUE` | `MTL_OPT_TX_QUEUE = MTL_TXQ_SHARED` (`session.tx_queue`) on the instance: the default of its sessions (contract.md §12.4); a session's own wins | MS1 | Co; SMP 1, RXTX 1, RS 1. Today it forces TSC pacing for the whole port (`mt_dev.c:1491-1493`) |
 | U-076 | shared RX queue: `MTL_FLAG_SHARED_RX_QUEUE` | `MTL_OPT_SHARED_RX_QUEUE` | MS1 | R; SMP 1, RXTX 1, RS 1 |
 | U-077 | RX through the CNI queue: `MTL_FLAG_RX_USE_CNI` | `MTL_OPT_RX_USE_CNI` | MS1 | R; RXTX 1 |
 | U-078 | flow rules on UDP port only: `MTL_FLAG_RX_UDP_PORT_ONLY` | `MTL_OPT_RX_UDP_PORT_ONLY` | MS1 | R; RXTX 1 |
@@ -365,7 +365,7 @@ because the pipeline ops and frame structs embed these types (§4).
 
 | U-ID | Legacy | Unified home | When | Notes |
 |---|---|---|---|---|
-| U-280 | TX one data item per frame: `ST40_TX_FLAG_FAST_METADATA` on a frame-level ST40 session (`st40_api.h:82-102`), `get_next_frame`, `st40_frame.data`/`data_size` (`meta[]` ignored), `st40_tx_get_framebuffer` | `sc.essence = MTL_FASTMETA`, `u.used` | MS4a2 | R; RXTX 1, KT 1, UT 3; S!; a unified TX unit is one data item too, at most `sc.max_udp_payload` − 16 (D-247) |
+| U-280 | TX one data item per frame: `ST40_TX_FLAG_FAST_METADATA` on a frame-level ST40 session (`st40_api.h:82-102`), `get_next_frame`, `st40_frame.data`/`data_size` (`meta[]` ignored), `st40_tx_get_framebuffer` | `sc.essence = MTL_FASTMETA`, `u.used` | MS4a2 | R; RXTX 1, KT 1, UT 3; S!; a unified TX unit is one data item too, within the bound of `mtl.h` (D-247) |
 | U-281 | data item type and K bit: `st40_tx_ops.fmd_dit`, `fmd_k_bit` (TX only) | `f.data_item_type`, `f.k_bit` | MS4 | R; RXTX 4, KT 1, UT 2; S! |
 | U-282 | RX filter on DIT / K: none today; the `st41_rx_ops` filter (`0xffffffff` / `0xff` = off) went with st41 in `88d47ac83`, and ST40 RX in fast metadata mode has none | `MTL_FASTMETA_RX_MATCH_DIT`, `_MATCH_K` | MS4a2 | |
 | U-282, continued | | | | new; the RX binding filters per data item at dequeue (D-247); none in the library today; RXTX 1 checks DIT and K itself (`rx_ancillary_app.c:128-131`). Unified, the filter changes with `MTL_UPDATE_MEDIA` in CREATED or STOPPED |
@@ -537,7 +537,7 @@ The U-row of §2 gives the symbol and the milestone.
 | AU5 | size helpers (`:754-830`) | FF `mtl_st30p_{rx,tx}.c:126/129`; GST `gst_mtl_st30p_rx.c:229`; Rust `audio.rs:215` | COVERED (U-245, U-246) |
 | AU6 | audio RTCP flags | RXTX `legacy/rx_audio_app.c:379` | CUT-7 |
 | AU7 | AM824/AES3 conversion (`st_convert_api.h:1064`) | — | COVERED (U-255) |
-| AN1 | ANC frame sessions, ≤ 20 meta (`st40_api.h:691`, `:802`) | RXTX `tx_ancillary_app.c:535`, `rx_ancillary_app.c:311` (main app, not legacy/); KT `st40_test.cpp:832/586` | COVERED (U-260, U-261) |
+| AN1 | ANC frame sessions, ≤ 20 meta (`st40_api.h:691`, `:802`) | RXTX `tx_ancillary_app.c:535`, `rx_ancillary_app.c:311` (main app, not legacy/); KT `st40_test.cpp:832/1030` | COVERED (U-260, U-261) |
 | AN2 | ANC RTP level (`:772-788`, `:844-855`) | RXTX `tx_ancillary_app.c:168`, `rx_ancillary_app.c:169`; KT | COVERED (U-344) |
 | AN3 | RFC 8331 and UDW helpers (`:894-1003`) | GST `gst_mtl_st40p_tx.c:655,706-707`; RXTX `rx_ancillary_app.c:17,30`; UT, fuzz | COVERED (U-268, H-13) |
 | AN4 | test mutation config (`:112-130`) | GST test element | COVERED (U-267) |

@@ -205,7 +205,7 @@ and ST40P says "MEDIA_CLK is used" (`include/st40_pipeline_api.h:96-99`), contra
 | 15 | two-phase release only on st20p TX; `notify_ext_frame_free` a silent no-op without the flag or with a converter | `include/st_pipeline_api.h:1863-1865` |
 | 16 | the get/put threading rule ("one application thread per session and direction") lives only in `doc/design.md:357-371` | `include/st_pipeline_api.h:1797-1822` |
 | 17 | `user_meta` pointer lifetime unspecified **[unknown]** | `include/st20_api.h:443-449` |
-| 19 | unknown flag bits never rejected; the only mask checks are EXACT-needs-USER_PACING | `st_tx_video_session.c:4062`, `st_tx_ancillary_session.c:2262` |
+| 19 | unknown flag bits never rejected; the only mask checks are EXACT-needs-USER_PACING | `st_tx_video_session.c:4131-4133`, `st_tx_ancillary_session.c:2262` |
 | 20 | `MTL_FLAG_BIND_NUMA` never read while `MTL_FLAG_NOT_BIND_NUMA` is (`mt_main.c:614`); `MTL_FLAG_CNI_THREAD` silently wins over `CNI_TASKLET` (`mt_cni.c:567-572`); the `TX_VIDEO_MIGRATE` doc described RX (DD-13a), fixed on main, `65a0b610f` | `include/mtl_api.h:345-350` |
 | 21 | `*_DROP_WHEN_LATE` is ignored without USER_PACING and a TAI timestamp, with no error; it drops frames more than one period in the past. The headers said "when MTL reports late" until `65a0b610f` (DD-15) | `st20_pipeline_tx.c:126-141`; `include/st_pipeline_api.h:464-472` |
 | 22 | reserved fields: `st20_rx_ops.pacing`/`.packing`, `ST22_PACK_SLICE` "not support now", `sample_size`/`sample_num`, `tx/rx_sessions_cnt_max` | `include/st20_api.h:1510-1513`, `:386-387`; `include/st30_api.h:476-481`; `include/mtl_api.h:746-761` |
@@ -384,7 +384,7 @@ slice and two ports (`:2747-2773`).
 | app formats | `enum st_frame_fmt` | raw ↔ codestream | PCM | UDW + meta |
 | SIMD conversion | in the app thread inside `put_frame`/`get_frame` (`st20_pipeline_tx.c:877-878`, `st20_pipeline_rx.c:843-890`) | — | — | — |
 | plugin conversion | preferred, internal fallback (`st20_pipeline_tx.c:619-653`) | codec plugins: JPEG-XS, H264/H265 (CBR), `quality`, `codec_thread_cnt`, `codestream_size` | — | — |
-| derive (no conversion) | app format = transport format (`st20_pipeline_tx.c:1132`, `st20_pipeline_rx.c:1074`) | app format = codestream (`st22_pipeline_tx.c:1026-1028`) | implicit | implicit |
+| derive (no conversion) | app format = transport format (`st20_pipeline_tx.c:1132`, `st20_pipeline_rx.c:1074`) | app format = codestream (`st22_pipeline_tx.c:1038-1041`) | implicit | implicit |
 | ext frame | derive → transport zero copy; else conversion source only (`st20_pipeline_tx.c:467-468`) | TX encoder source, RX decoder destination | — | — |
 | `st22p` profile | — | forced NARROW (`st22_pipeline_tx.c:535`) | — | — |
 
@@ -400,7 +400,7 @@ files loaded at `mtl_init` from JSON (`KAHAWAI_CFG_PATH`, `doc/plugin.md`), at m
 
 | Backend (prefix) | `enum mtl_pmd_type` | Status | Facts |
 |---|---|---|---|
-| DPDK AF_XDP (`dpdk_af_xdp:`) | 19 | experimental | pacing **[unknown]**; mbuf pool reuse for zero copy (`st_tx_video_session.c:3399-3403`); overlaps native AF_XDP; the code knows only `dpdk_af_xdp:` (`mt_util.c:962` **[re-read]**); `doc/experimental/af_xdp.md:54` said `af_xdp:` until `17b793074` (DD-10) |
+| DPDK AF_XDP (`dpdk_af_xdp:`) | 19 | experimental | pacing **[unknown]**; mbuf pool reuse for zero copy (`st_tx_video_session.c:3417-3421`); overlaps native AF_XDP; the code knows only `dpdk_af_xdp:` (`mt_util.c:962` **[re-read]**); `doc/experimental/af_xdp.md:54` said `af_xdp:` until `17b793074` (DD-10) |
 | DPDK AF_PACKET (`dpdk_af_packet:`) | 20 | experimental | TSC; "testing only, very slow" (KB §7) |
 | native AF_XDP | 4 | production | optional build (`lib/meson.build:28-34`); `CAP_NET_RAW`; zero-copy XSK with a copy fallback (`dev/mt_af_xdp.c:422-446`); MtlManager brokers the XSK map, queues and flows (`mt_instance.h:15-24`) |
 | kernel socket | 17 | experimental | RX buffer sizing needs `CAP_NET_ADMIN` or `rmem_max`; no flow steering (`MT_DRV_F_RX_NO_FLOW`); TSC pacing only **[inferred]** from `dev_if_select_pacing` (`dev/mt_dev.c:1486`); without a socket thread ring the TX `sendto` runs on the tasklet (`datapath/mt_dp_socket.c:79-80`, `:136`, `:153`) |
@@ -409,14 +409,14 @@ Driver flags `MT_DRV_F_*` are defined at `mt_main.h:651-669`. CNI (ARP, IGMP, PT
 DPDK PMD and DPDK AF_PACKET; native AF_XDP, kernel socket and DPDK AF_XDP set `MT_DRV_F_NO_CNI` and
 leave it to the kernel (`dev/mt_dev.c:81`, `:97`, `:105`). Cross-cutting facts:
 `MTL_FLAG_SHARED_RX_QUEUE` dispatches in software after the flow rule (`datapath/mt_queue.c:75-79`);
-shared RSS is auto-enabled (L3_L4) for `MT_FLOW_NONE` drivers (`dev/mt_dev.c:2359-2362`); the IGMP
+shared RSS is auto-enabled (L3_L4) for `MT_FLOW_NONE` drivers (`dev/mt_dev.c:2377-2379`); the IGMP
 join is skipped under DATA_PATH_ONLY (`st_rx_video_session.c:3218`); `mtl_dma_map`/`unmap` refuse
 non-VA IOVA and `mtl_udma_create` refuses PA (`mt_main.c:840`, `:901`, `:1144` **[re-read]**); DMA
 engines (`dma_dev_port[]`) serve ST20 RX only, with a silent CPU fallback; a VF has no HW timesync
 (about 1 µs, `doc/design.md:279-296`); no DSCP, TTL fixed at 64, no VLAN, IPv4 only, MTU ≤ 1500
 (`include/mtl_api.h:79-89`); global `MTL_FLAG_RANDOM_SRC_PORT`/`MULTI_SRC_PORT` change per-session
-behaviour (`st_tx_video_session.c:3390-3395`); migration is video only; DPDK secondary processes are
-impossible (`--in-memory`, DD-02); Windows has no MtlManager, kernel socket or AF_XDP
+behaviour (`st_tx_video_session.c:3409-3413`, `:3425`); migration is video only; DPDK secondary
+processes are impossible (`--in-memory`, DD-02); Windows has no MtlManager, kernel socket or AF_XDP
 (`mt_instance.c:7`, `datapath/mt_dp_socket.c:24`, `lib/meson.build:125`).
 
 Session management: create before or after `mtl_start` (`doc/design.md:66-103`); what an update
@@ -462,8 +462,8 @@ the U-row is right.
 
 The fix rows are engine.md §7.2 (DD). Rows #1, #5–#10, #12–#14 (DD-05, DD-16, DD-10, DD-02,
 DD-13a, DD-17, CUT-4, DD-04, DD-06, DD-07) have their full evidence in the DD row; the others add to
-it. Every DD row is fixed on main except DD-16 (in part) and DD-19…DD-21; engine.md §7.2 gives the
-commit of each. Lines at `a6fc9093`.
+it. Every DD row is fixed on main except DD-03 and DD-16 (in part) and DD-19…DD-21; engine.md §7.2
+gives the commit of each. Lines at `a6fc9093`.
 
 | # | Drift | Evidence | Row |
 |---|---|---|---|
@@ -1041,13 +1041,13 @@ consults. External memory exists only for ST20 and ST22 video.
 | `mt_rte_zmalloc_socket` | `rte_zmalloc_socket(…, RTE_CACHE_LINE_SIZE, socket)` (`mt_mem.h:38-39`) | 64 B | `rte_malloc_virt2iova` |
 | `mtl_hp_malloc/zmalloc` | the same on `mt_socket_id(impl, port)` (`mt_main.c:764-796`) | 64 B | `mtl_hp_virt2iova` (`:803-806`, start only) |
 | `mtl_dma_mem_alloc` | libc `iova_size + page_size`, page-aligned, then `mtl_dma_map` (`mt_main.c:929-971`) | page | invented |
-| `mtl_dma_map` | map table + `rte_extmem_register(vaddr, size, NULL, 0, page_size)` + `rte_dev_dma_map(port P)` (`mt_main.c:819-879`) | 4 KiB `sysconf` page, not the hugepage size (`:582-584`, `:830-838`) | invented from `0x10000`; a non-DPDK primary port returns it with no mapping (`:858-860`); the extmem memseg has no IOVA table **[inferred]** |
+| `mtl_dma_map` | map table + `rte_extmem_register(vaddr, size, NULL, 0, page_size)` + `rte_dev_dma_map(port P)` (`mt_main.c:819-879`) | 4 KiB `sysconf` page, not the hugepage size (`:582-584`, `:830-838`) | invented from `0x10000`; a non-DPDK primary port returns it with no mapping (`:853-855`); the extmem memseg has no IOVA table **[inferred]** |
 | GPU `gpu_allocate_shared_buffer` | `zeMemAllocShared(…, 16, …)` (`gpu_direct/gpu.c:213`) | 16 B | none (0) |
 
 `mtl_dma_map` in steps: page-align check (`mt_main.c:830-838`); reject any IOVA mode but VA
 (`:840-843`); `mt_map_add` (`mt_dma.c:14-69`) under a pthread mutex: overlap check, then
 `iova = max(highest existing iova_end, 0x10000)` (a bump allocator, never reused);
-`rte_extmem_register` (`mt_main.c:862`); `rte_dev_dma_map` on port P with the comment "only map for
+`rte_extmem_register` (`mt_main.c:857`); `rte_dev_dma_map` on port P with the comment "only map for
 MTL_PORT_P now" (`:864-865`). `mtl_dma_unmap` unmaps port P and unregisters the extmem
 (`mt_main.c:881-927`) and needs the exact `(vaddr, size, iova)` (`mt_dma.c:87`); `mt_map_uinit`
 frees leftovers with a warning and does not unmap them (`mt_dma.c:111-126`). GPU allocation is

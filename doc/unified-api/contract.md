@@ -631,15 +631,17 @@ unresolved.
   AES67 formats L16 and L24 *(inferred: AES67 not read)*.
 - **Fastmeta.** A TX unit is one data item, sent as one RTP packet: a data item lies wholly
   inside one packet under the 1460 B Standard UDP Size Limit (ST 2110-41 §5.4; the 9-bit length
-  would allow 511 words), so TX `buffer_capacity_bytes` is at most `sc.max_udp_payload` − 16, 359
-  words (1436 B) at the default 1452, and 0 means that; more is `-MTL_EINVAL`, field
-  `fastmeta.buffer_capacity_bytes`, at create and at a `MTL_UPDATE_MEDIA` that lowers
-  `sc.max_udp_payload` (D-247). MTL writes the type, the K bit and the length and zero-pads the
-  content to 32 bits. One packet per unit keeps the §7 bucket at any unit rate; several packets
-  per unit could leave only four back to back, then one per 1.25 ms carried from unit to unit,
-  which spreads a 64 KiB unit over 52.5 ms, past its frame and the receiver's due time (D-247). So
-  several items per unit, several item types in one stream (§5.1) and Annex A segmentation are
-  carried by packet units. `used` 0 sends one RTP packet with no data item, the keep-alive (§5.1).
+  would allow 511 words), so TX `buffer_capacity_bytes` is at most the largest data item that one
+  RTP packet of `sc.max_udp_payload` holds (the bound and its value at the default: the comment of
+  `buffer_capacity_bytes` in [`mtl.h`](sketch/include/mtl/experimental/mtl.h)), and 0 means that;
+  more is `-MTL_EINVAL`, field `fastmeta.buffer_capacity_bytes`, at create and at a
+  `MTL_UPDATE_MEDIA` that lowers `sc.max_udp_payload` (D-247). MTL writes the type, the K bit and
+  the length and zero-pads the content to 32 bits. One packet per unit keeps the §7 bucket at any
+  unit rate; several packets per unit could leave only four back to back, then one per 1.25 ms
+  carried from unit to unit, which spreads a 64 KiB unit over 52.5 ms, past its frame and the
+  receiver's due time (D-247). So several items per unit, several item types in one stream (§5.1)
+  and Annex A segmentation are carried by packet units. `used` 0 sends one RTP packet with no data
+  item, the keep-alive (§5.1).
   TX frame units: `tx.underrun_policy` not SKIP (`OPTION_RANGE`; the default
   `MTL_UNDERRUN_KEEPALIVE` sends that keep-alive, D-243). A session carries one `data_item_type`
   and `k_bit`. The payload type is dynamic, 96–127 (§5.2), and the marker is 0 on every packet. An
