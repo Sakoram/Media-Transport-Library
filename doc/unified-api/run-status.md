@@ -19,6 +19,16 @@ base commit.
 |---|---|---|
 | 2026-10-16 | preparation: tests at `770294a1` (the library is unchanged since) | `./build.sh` green after `build/` was moved back to the `/usr/local` prefix; `./build.sh unit` 959 passed, 1 skipped; KahawaiTest `St20p*` 44/44 on the E830 (`0000:15:01.0`/`.1`) and on the E810 (`0000:c9:01.0`/`.1`) |
 | 2026-10-16 | preparation: host | patched ICE `Kahawai_2.6.7`; MtlManager of this tree running; the stale `st41_api.h` removed from `/usr/local/include/mtl` and `.local_install/mtl/include/mtl`; both install trees built from `770294a1` (`build-both.sh`) |
+| 2026-10-20 | guard check at `b38e258c` (autonomous-run.md §9) | **failed; the run stopped before R0.** `env \| wc -l` ran instead of being blocked: `.github/claude/settings.local.json` is missing, so step 1 of §9 was not done (see below) |
+
+The guard check of 2026-10-20: without `settings.local.json` the session ran in bypass
+permissions mode, not `dontAsk`, and the `PreToolUse` guard (`.git/autonomous-run/bash-guard.py`,
+present) was not enabled. The git hooks `commit-msg`, `pre-commit`, `pre-merge-commit` and
+`pre-push` are installed. The probes of a subagent's `git push origin x` and a Write to
+`.git/hooks/x` were not run, because with the guards off they could take effect. To restart, copy
+`/home/labrat/wip/unified-api-impl/settings/settings.local.candidate.json` to
+`.github/claude/settings.local.json`, run `test-permissions.sh`, and start `claude` again with the
+orchestrator prompt of autonomous-run.md §9.
 
 ## 2. Milestones
 
