@@ -49,7 +49,7 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | Options, stats, errors and logs | D-19, D-21, D-73, D-80, D-81, D-84, D-128, D-129, D-139, D-153, D-154, D-175, D-244 | OI-40, OI-50, OI-54, OI-65, OI-69 | contract.md, engine.md |
 | Headers and structs | D-05, D-33, D-34, D-45, D-71, D-72, D-74, D-97, D-104, D-105, D-137, D-140, D-185, D-187, D-195, D-217, D-223 | OI-70 | the headers, contract.md, README.md |
 | Versioning and export | D-23, D-83, D-106, D-108, D-190, D-191, D-194 | OI-64 | migration.md |
-| Legacy APIs and engines | D-18, D-24, D-27, D-57, D-112, D-114, D-123, D-125, D-178, D-189, D-197, D-240, D-246 | OI-3, OI-81 | migration.md, engine.md |
+| Legacy APIs and engines | D-18, D-24, D-27, D-57, D-112, D-114, D-123, D-125, D-178, D-189, D-197, D-240, D-246, D-248 | OI-3, OI-81 | migration.md, engine.md |
 | Validation and process | D-64, D-66, D-87, D-98, D-107, D-109, D-110, D-113, D-135, D-136, D-138, D-184, D-188, D-200, D-245 | — | implementation-plan.md, autonomous-run.md |
 | Deployment and pods | D-49, D-63, D-69, D-89, D-90, D-91, D-92, D-116, D-117 | OI-23, OI-43, OI-75 | deployment.md |
 | NMOS, SDP and IPMX | D-93, D-94, D-95, D-96, D-196 | — | nmos-ipmx.md |
@@ -168,7 +168,7 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | D-120 | The result reservation is one counter `resv`, CAS-incremented while `resv − reap_seq < N`; releasing an APP lease decrements it | core.md |
 | D-121 | Stop against submit: after its QUEUED store, submit re-loads the session state (seq_cst) and, if the session no longer accepts, applies the flush CAS itself, so exactly one of stop and submit wins; stop always drains the in-flight counter | core.md §5.3 |
 | D-122 | Superseded by D-158, D-159 (no wait handle: probes arm nothing, event loops arm a queue explicitly). Was: one wait handle per object (an eventfd; a Windows event from MS2a), made by the first `mtl_get_wait_handle`, whose mask it fixes; for event loops only, WT calls sleep on the wake word (D-141); a miss arms its target only when it is in the handle's mask | core.md |
-| D-123 | TX recovery (MS1, E1a) records a verdict (DROPPED, `RECOVERY`) in the slot and drops only software-held references; the last PMD reference (the free callback) publishes; two `sh_info` per engine frame alternate per use, a use generation in `fcb_opaque`, so a stale free never completes the next use; attached memory completes after the queue stop/start (S8, MS3) | engine.md |
+| D-123 | TX recovery (MS1, E1a) records a verdict (DROPPED, `RECOVERY`) in the slot and drops only software-held references; the last PMD reference (the free callback) publishes; two `sh_info` per engine frame alternate per use, a use generation in `fcb_opaque`, so a stale free never completes the next use (continued below the table). Amended by D-248: the pair is T-REP's | engine.md |
 | D-124 | The core sees an instance-context interface (socket-aware alloc, TSC or test clock, wake flush hook, scheduler ID), never `struct mtl_main_impl*`; a null-only instance skips `mtl_init`, starts EAL itself (`--no-huge --no-pci --in-memory`) or uses a running one, and loops on a library thread; under the test clock completions run inside `MTL_FAULT_CLOCK_ADVANCE` (G-92) | core.md |
 | D-125 | `st_engine_core.h` lists every engine entry point the bindings use besides the callbacks: a tasklet-callable RX frame put, the packet bitmap (MS2), "last packet handed" (MS2), the recovery verdict (MS1), per-leg arrival time, an RTP sequence seed (OI-62), an engine frame count ≥ pool_count + slot_max for RX_LATEST and BY_INDEX (E11); `st41_rx_set_unit_sink` (MS4a1, D-174) | engine.md |
 | D-126 | RX uses `query_ext_frame` with core-allocated slots from MS1, one RX path; delivery order is a per-session `pub_seq` fetch-added by the completer; TX library pools use the engine framebuffers in MS1 (OI-59) | core.md |
@@ -285,13 +285,14 @@ Each D-row and OI-row under one topic; the home names the documents that specify
 | D-237 | The launch delay (`min_tx_delay_ns`) changes while running from MS5 under `MTL_UPDATE_MEDIA`, from the first media index at or after `when`. Longer: the skipped slots follow the underrun policy. Shorter: `BEHIND`. MTL never changes it by itself. | contract.md §4.7; timing.md §5.2 |
 | D-238 | No running format or TROFFSET change: stop, MEDIA and start, or a second session started at an instant while the first drains (ex18 `hand_over_*`); the first session's REPEAT pins drop when its DRAIN begins (D-212). Two TX sessions may carry the same flows (contract.md §4.3). | contract.md §4.3, §4.7; nmos-ipmx.md §11.5 |
 | D-239 | `MTL_UNDERRUN_REPEAT` (= 5; video, and cvideo JPEG XS from MS4b), RUNNING only, `-MTL_ENOTSUP` until T-REP (MS4a1). (continued below the table) | timing.md §6.4 |
-| D-240 | The engine for REPEAT: a use record per E1a `sh_info` (meta, address, IOVA, generation, busy); `busy` is atomic: the free callback's release store is its last access to the record, and the builder's acquire load precedes any write to it. The builder refuses only a busy use; the free callback completes its own use. (continued below the table) | engine.md §2.2 |
+| D-240 | The engine for REPEAT: a use record per E1a `sh_info` (meta, address, IOVA, generation, busy); `busy` is atomic: the free callback's release store is its last access to the record, and the builder's acquire load precedes any write to it (continued below the table). Amended by D-248: T-REP adds the two `sh_info` | engine.md §2.2 |
 | D-241 | Default SKIP for video, cvideo and audio (KEEPALIVE for ANC and fastmeta, D-243; D-13 stands); REPEAT is opt-in (MS4a1). (continued below the table) | contract.md §3.2, §3.10, §9.6 |
 | D-242 | Fill of lost data in library pools (MS2a): video, the format's black (sampling, depth, `video.range`, the NONSTD formats too; RGB FULL a `memset`); audio, cvideo and fastmeta: zero; ANC units are never filled; the tail zero. (continued below the table) | contract.md §9.8 |
 | D-243 | One keep-alive value: `MTL_UNDERRUN_KEEPALIVE` is the essence's keep-alive at its standard's cadence and the default of ANC and fastmeta; `MTL_UNDERRUN_EMPTY_ANC` is removed and value 2 retired; SKIP is refused for ANC and fastmeta frame units (`OPTION_RANGE`); packet units keep SKIP. | timing.md §6.4 |
 | D-244 | Stats: `tx.units_repeated` removed; `tx.units_padded` → `tx.indices_filled`, a subset of `tx.indices_empty`; `rx.units_zero_filled` → `rx.units_filled` and `rx.bytes_zero_filled` → `rx.bytes_filled`, for every essence. Amends D-203. | contract.md §11.3 |
 | D-245 | The autonomous run (2026-10-16): agents implement MS1–MS7 with no maintainer available. Its process rules replace the maintainer's approvals, checkpoints and stop-and-ask for the run. Questions and plan bugs are decided by competing designers and a judge, and recorded as D-rows to confirm. Each commit is pushed to the fork branch `unified-api-impl`. Amends D-135 | autonomous-run.md |
 | D-246 | The legacy `BLOCK_GET` get (st20p MS2b; st22p, st30p, st40p MS4) is DP, then WT with the session's legacy wake mode; `wake_block` is LW1: a store to `lkick` on the in-flight line, then EVENT on lane 0. (continued below the table) | wait-protocol.md §3, migration.md §6.5 |
+| D-248 | E1a and REPEAT on main's `tv_frame_free_cb` (`8c9d48f3e`): E1a is MF1's claim (SF-39), MF7 and the recovery verdict with one `sh_info` per frame; the binding names a unit from its own record of the frame; the two alternating `sh_info` come with T-REP. (continued below the table) | engine.md §2.2, §5 |
 
 Rows too long for the table, continued:
 
@@ -305,6 +306,10 @@ Rows too long for the table, continued:
   the result, release-stores PUBLISHED, then RMWs the event word
 - **D-119**, continued: the binding picks up only the entry at its cursor whose slot word is QUEUED
   with its generation; size a power of two ≥ pool_count + 1 (D-207)
+- **D-123**, continued: attached memory completes after the queue stop/start (S8, MS3). Amended
+  by D-248: the two alternating `sh_info` and the use generation in `fcb_opaque` come with REPEAT
+  (T-REP, MS4a1); E1a keeps one `sh_info` per frame, since nothing reuses a frame before its old
+  mbufs are freed until then.
 - **D-131**, continued: and drives the engine with `USER_PACING | RTP_TIMESTAMP_EPOCH`,
   `required_tai = N·T`; no `notify_frame_late`
 - **D-142**, continued: If S1 fails: D-170's patterns, the slack gate, the notifier (D-165)
@@ -486,8 +491,11 @@ Rows too long for the table, continued:
   empty index E and the RTP `rtp(N) + RTP(E) − RTP(N)`, N the pin's index and RTP(i) the RTP of
   index i (timing.md §6.4). A repeat is not a unit: no `seq`, no result, no user meta. A busy or
   late repeat is skipped and counted in `tx.indices_empty`.
-- **D-240**, continued: Core sessions only; legacy unchanged. The pins are D-212's. Not taken:
-  aliased spare frames (E11), a copy.
+- **D-240**, continued: The builder refuses only a busy use; the free callback completes its own
+  use. Core sessions only; legacy unchanged. The pins are D-212's. Not taken: aliased spare frames
+  (E11), a copy. Amended by D-248: the two alternating `sh_info` the records sit on come with
+  T-REP, not E1a; for core sessions the records' meta and address replace main's `done_*`
+  (`8c9d48f3e`).
 - **D-241**, continued: The TX default pool under REPEAT is max(`min_count_direct`, 3) +
   (`defer_step` − 1); the hard minimum is pins + 1 (2, interlaced 3, `POOL_TOO_SMALL`); a REPEAT TX
   over another session's pool needs the owner's n + 1 + `defer_step`, n the owner's units in
@@ -507,6 +515,21 @@ Rows too long for the table, continued:
   token on TX would undo `0d05bbd40`'s no-op (SF-91), and counters in the wrapper break the bool
   token (`legacy_wake.py`). Taken in the autonomous run (2026-10-20, D-245); to confirm by the
   maintainer
+- **D-248**, continued: MF1's claim is a `refcnt` CAS 1 → 2 in `tv_frame_free_cb` and in legacy
+  recovery's frame loop, then minus 2. MF7's reference is dropped also when recovery or teardown
+  abandons a frame in build. Recovery records the verdict before it drops any reference. The video
+  TX binding writes its record of the frame at its pick and reads it and main's `done_*` copy only
+  before its publish; from MS2b, where one engine frame carries different slots, it hands a frame
+  out again only after its notify of the frame's previous use has returned. REPEAT's use records
+  (D-240) replace `done_*` for core sessions. Why: until REPEAT no frame is picked while its
+  `sh_info` counts, since the builder takes a frame only at `refcnt` 0 and only the free callback
+  restores it once recovery records a verdict, so the pair has no consumer and no failing test
+  before T-REP; main's release before the notify lets `refcnt` 0 come before the binding's notify,
+  which only a frame re-bound to another slot (MS2b) exposes (`design/models/tx_completion.py`).
+  Not taken: D-240's records and `busy` in E1a; a core free callback with a hook of its own
+  (core.md §1); legacy SF-39 left to R2, which never reaches a raw `st20_tx` session; a use record
+  without address and IOVA. Amends D-123 and D-240. Taken in the autonomous run (2026-10-20,
+  D-245); to confirm by the maintainer
 
 ## 3. Why: prior art
 

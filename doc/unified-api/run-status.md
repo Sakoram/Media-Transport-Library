@@ -65,6 +65,8 @@ confirm. One row each; the D-row holds the decision itself.
 |---|---|---|---|---|
 | 2026-10-20 | R0 | WAKE: what the legacy pipeline wait keeps after main's wake fixes (LB-14's `kick` was undefined; how RB0–RB2 keep main's blocking unit cases green) | D-246 | |
 | 2026-10-20, continued | | | | `/home/labrat/wip/unified-api-impl/r0/design/wake/verdict.md`; model `design/models/legacy_wake.py` (`/home/labrat/wip/unified-api-impl/r0/design/wake/judge/legacy_wake.out`, `judge/break_wk_a.out`); `UnitTest --gtest_filter='*St20PipelineRxBlocking*:*St20PipelineTxBlocking*:*PipelineTxWakeBlock*'`: 30 passed |
+| 2026-10-20 | R0 | E1a and REPEAT on main's `tv_frame_free_cb` (`8c9d48f3e`): E1a's scope, the binding's naming, SF-39's and SF-18's owners, the PR #1770 conditions | D-248 | |
+| 2026-10-20, continued | | | | `/home/labrat/wip/unified-api-impl/r0/design/e1a/verdict.md` (with problem.md, e1-a.md, e1-b.md, e1-c.md, judge/); model `design/models/tx_completion.py` (`judge/tx_completion.out`); `UnitTest --gtest_filter='*St20TxExtFrameDoneTest*:*St20TxTaskletPending*'`: 17 passed |
 
 ## 4. Blocked outside the run
 

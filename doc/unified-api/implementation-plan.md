@@ -223,13 +223,13 @@ OI-60):
 
 ### 3.2 Code that must land first
 
-- **PR #1770** (merged on main, 2026-10-07): of its rows MS1 needs SF-05/MF1 (an ext buffer was reported done
-  before its `refcnt` was decremented, `tv_frame_free_cb`; fixed on main, `8c9d48f3e`, which
-  decrements and clears before notifying, `st_tx_video_session.c:144-155`), SF-08,
-  SF-09 and SF-23. If it is not merged by the end of week 1, the MF1 hunk is taken into task E1a. The
-  PR also fixes the video `update_destination` that writes the source UDP port into the destination
-  port (fixed on main, `fc331c22e`, `st_tx_video_session.c:3846-3849`); task G1a (MS3) takes that
-  hunk if the PR is not merged.
+- **PR #1770** (merged on main, 2026-10-07): the rows MS1 needs from it are on main: SF-05's order
+  (`8c9d48f3e`: `tv_frame_free_cb` copies the meta, clears an ext frame's `addr/iova` and
+  decrements `refcnt` before it notifies, `st_tx_video_session.c:139-157`), SF-08 (`fb13bf68a`),
+  SF-09 (`41b57223d`) and SF-23 (`bf821e47f`). MF1's claim did not land; task E1a takes it (SF-39,
+  D-248). The video `update_destination` port fix is on main too (`fc331c22e`,
+  `st_tx_video_session.c:3846-3849`). The PR's SF-18 part did not land and no task of the run takes
+  it ([engine.md](engine.md) §7.1).
 - **PR #1610's legacy st20p parity tests**, folded into main's harness
   (`tests/unit/pipeline/st20p_tx_harness.c`, `st20p_harness.c`) before any engine change of MS1, so
   they pin today's behaviour (task T1). Its eventfd and poll loop in `mt_session_event.c` and
@@ -571,7 +571,7 @@ estimates [I].
 | S0 | baseline measurement, owned by the main session (detail below): the S0 loads, RL and TSC, through `.github/scripts/perf/` | P0 | — | — | the medians and A/A spreads of the §8.4 metrics per load in ms1-status §4, every A/A rule met or a revision asked for as a D-row; legacy's capacity C per load by MS2a's exit |
 | T1 | PR #1610's legacy st20p parity tests on main's harness: the 9 TX cases of `a693810c` and the 4 RX cases of `f23158c1` (pr1610.md §3) | — | 600 test | — | they pin today's behaviour and pass; Gate 2: each test fails with the line it pins reverted locally |
 | H1b | series of four (below): 0 the tables; 1 the headers moved, with the inline-helper U tests and G-148; 2 the API shell, nodes `_MS1` and `_BRIDGE`, the seal checks, `st_avail_check`, `st_api_ret`; 3 the run options | P0 | ≈ 1.45 k (1.0 k data); 3.6 k moved + 0.39 k; 1.05 k + 450; 150 | — | the four parts' exits (below) |
-| E1a | engine fixes, TX completion: MF1 (unless PR #1770 landed), MF7, the TX recovery verdict with the two alternating `sh_info` and the use generation in `fcb_opaque` (engine.md §5), storing no W (D-209); the verdict part of `st_engine_core.h` | T1; S0's at-quota data before its commit | 230 + UB | yes | the legacy gate on a VF, TSC and RL; UB for MF1, MF7, the verdict |
+| E1a | engine fixes, TX completion on main's `tv_frame_free_cb`: MF1's claim (SF-39), MF7, the TX recovery verdict with one `sh_info` per frame (engine.md §5, D-248), storing no W (D-209); the verdict part of `st_engine_core.h` | T1; S0's at-quota data before its commit | 110 + UB | yes | the legacy gate on a VF, TSC and RL; UB `St20TxFrameCompletionTest.*` |
 | E1b | idle descriptor cleanup, only in `WAIT_FRAME`: on dedicated queues, and on shared queues by a rewrite of `mt_tsq_done_cleanup` that takes `tx_mutex` by trylock (lock on the recovery path, never `tsq_lock`), frees at most `tx_rs_thresh` per visit and skips AF_XDP (D-213) | E1a | 160 | yes | the legacy gate; UB G-147 |
 | E1c | RX: incomplete delivery always on, SF-45 (the hook never refuses); the RX put and per-leg arrival time of `st_engine_core.h` | T1 | 90 + UB | yes | the legacy gate; UB `rx_incomplete_status` |
 | E1d | SF-49, the ST30P and ST40P user timestamps, OI-3 teardown order, the wrapper count and the `mtl_uninit` guard | T1 | 130 | yes | the legacy gate; `tests/unit/session/st30_tx/pacing_test.cpp`, `multi_essence_sync_test.cpp` unchanged |
@@ -845,7 +845,7 @@ calls the increment and the decrement.
 
 | Design to read | Code to open first |
 |---|---|
-| engine.md §2, §5, §6, §7.1 (MF1, MF7, SF-45, SF-49); §7 of this plan; the E1 bullet above; D-213 | `st_tx_video_session.c`, `st_video_transmitter.c`, `st_rx_video_session.c`, `datapath/mt_queue.c`, `datapath/mt_shared_queue.c`, `mt_sch.c`, `st30_pipeline_tx.c`, `st40_pipeline_tx.c`, `mt_main.c` (`mtl_uninit`) |
+| engine.md §2, §5, §6, §7.1 (MF1, MF7, SF-39, SF-45, SF-49); §7 of this plan; the E1 bullet above; D-213, D-248 | `st_tx_video_session.c`, `st_video_transmitter.c`, `st_rx_video_session.c`, `datapath/mt_queue.c`, `datapath/mt_shared_queue.c`, `mt_sch.c`, `st30_pipeline_tx.c`, `st40_pipeline_tx.c`, `mt_main.c` (`mtl_uninit`) |
 
 Engine fixes: the rows of §7 whose task is E1a, E1b, E1c or E1d.
 
@@ -1091,8 +1091,8 @@ branch. If the maintainer counts the copies, they land inside their rewrite comm
 week 4 (the copy is exempt from the cap), and the count stays 4, 4, 4, 4. The stretch tasks A2b,
 B3 and X are written in week 4 only if the gates allow and are committed in MS2a.
 
-The lines a review unit carries grow: week 1 about 5.4 k (P0 0.75 k, T1 0.6 k, H1b 3.5 k of
-which 1.0 k is imported data, E1 0.61 k + UB; plus 3.6 k moved), week 2 about 6.0 k, week 3 about
+The lines a review unit carries grow: week 1 about 5.3 k (P0 0.75 k, T1 0.6 k, H1b 3.5 k of
+which 1.0 k is imported data, E1 0.49 k + UB; plus 3.6 k moved), week 2 about 6.0 k, week 3 about
 6.0 k, week 4 about 4.9 k (copies excluded). Weeks 2 and 3 carry the most, on the critical path
 C1b → C2 → A2a; week 1 grew the most (about +2.2 k: the tables and the histogram) and carries
 checkpoint 1 (§5.7). Every pre-decided split is used or replaced by a series, so weeks 2–4 keep
@@ -1339,7 +1339,7 @@ of B1 and B2 and may slip to MS2a.
 | two APIs in one process: teardown order, behaviour before `mtl_start()` | the wrapper closes before `mtl_uninit` (SP-01); U and I tests of the bridge; RxTxApp already calls `mtl_start` before it creates sessions (`rxtx_app.c:466`, `:513`); OI-2 |
 | review capacity | tasks under the commit cap (D-107), `mtl-reviewer` first, the WIP limits of §5.8; the gates of §5.2.3 cut stretch work first |
 | MS1 has 16 review units in 16 slots (4 a week) | C0, M0 and the two copies are not counted (else the copies land inside I1 and R1); I1's non-cross cases are the first to move to MS2a |
-| week 1 carries about 5.4 k lines for review, M0's about 0.4 k of docs beside them, and checkpoint 1 approves the binding ops and the register with C0 | the valves of §5.2.3: H1b part 3 moves into I1, `availability.def` becomes its own commit, M0 is outside the review budget, and S0's capacity search runs on later nights (only MS2a's exit needs it) |
+| week 1 carries about 5.3 k lines for review, M0's about 0.4 k of docs beside them, and checkpoint 1 approves the binding ops and the register with C0 | the valves of §5.2.3: H1b part 3 moves into I1, `availability.def` becomes its own commit, M0 is outside the review budget, and S0's capacity search runs on later nights (only MS2a's exit needs it) |
 | the wrapper's lifetime | `mtl_uninit` returns `-EBUSY` while it is open (MS1); the time thread arrives in MS2a and is joined by the wrapper's close |
 | C1b, C2, A2a, A2c and H1b near the cap | A2a is already split (A2c); H1b, E1, C1a, C1b, A1, C2, A2a and A2c are series; the valves of §5.2.3 in their order (R1's regular expression table, A2a (1) into A2a (2), the weeks 2–3 tests to MS2a), then stop and ask |
 | weeks 2 and 3 carry about 6.0 k each, on the critical path C1b → C2 → A2a, with no pre-decided split left | valve (3) of §5.2.3 (unnamed tests to MS2a), then stop and ask; the day-10 gate cuts B3, A2b and X first |
@@ -1601,8 +1601,8 @@ needs `MTL_MEDIA_INDEX`, MS3); the `ptp` group green on both applications.
   here, each later essence's binding with its milestone (MS4); the `live_rx` sample calls it
   (`--monitor`); G-87; about 600 + 500 lines.
 - **Update while running** (D-236), task **G1**, one review unit as a series of two: G1a, the core
-  and TX (the template swap in the builder's `tick` at `WAIT_FRAME`; PR #1770's port fix if the PR
-  is not merged; about 270 + 200 lines), and G1b, RX (make-before-break rules, one switch instant for every
+  and TX (the template swap in the builder's `tick` at `WAIT_FRAME`; about
+  270 + 200 lines), and G1b, RX (make-before-break rules, one switch instant for every
   changed leg, core.md §5.4; the slot reset only when every enabled leg changes;
   about 290–330 + 250 lines). `MTL_UPDATE_FLOWS` with `when` NULL or `MTL_NOW` on ARMED or RUNNING,
   leg by leg, with the state rows of [contract.md §4.7](contract.md#47-update);
@@ -1653,8 +1653,9 @@ A/V sync on the epoch timeline; fastmeta at any rate, through the rate entry of 
 essence members of `mtl_session_config`; RxTxApp kinds `st30p` and `"fastmetadata"` with
 `"type": "frame"` in `UnifiedRxTxApp`; their suites copied into `UnifiedKahawaiTest` (D-109);
 their acceptance directories on both applications; ex13 runs (ex14 at the exit of MS4a2, ex15
-at that of MS4b). **T-REP** (D-239, D-240, D-212): video `MTL_UNDERRUN_REPEAT`, about 1.25 k
-lines with the pin cases, one review unit under the commit cap, the Gate 6 legacy gate on TSC
+at that of MS4b). **T-REP** (D-239, D-240, D-212, D-248): video `MTL_UNDERRUN_REPEAT` with the
+two alternating `sh_info` per engine frame its use records sit on ([engine.md](engine.md) §2.2),
+about 1.3 k lines with the pin cases, one review unit under the commit cap, the Gate 6 legacy gate on TSC
 and RL, its files disjoint from audio and fastmeta; G-164, G-165, G-166, G-143's, G-145's and
 G-163's REPEAT cases. The fastmeta SKIP refusal (a create check, about 5 lines). Each essence
 binding of MS4a1, MS4a2 and MS4b brings its running FLOWS path with its `tick` (about 40 lines
@@ -1793,7 +1794,7 @@ A row without an engine.md §6 ID names its fix.
 |---|---|---|---|
 | R2 | fix | C1b | SF-05, SF-38, SF-39 |
 | `seq` assigned at submit (the descriptor ring) | fix | C1b (G-08) | SF-44 |
-| MF1 | fix | E1a, unless PR #1770 landed | SF-05 |
+| MF1 | fix | E1a (the claim; the order is on main, `8c9d48f3e`) | SF-39 (SF-05 fixed on main) |
 | MF7 | fix | E1a | — |
 | R1 | fix | E1a | SF-12, SF-41 |
 | idle descriptor cleanup (`mt_txq_done_cleanup`, rate-limited; shared queues by E1b's rewrite of `mt_tsq_done_cleanup`, which today takes the wrong lock, D-213), only with the frame state `WAIT_FRAME` | fix | E1b (G-03, G-147, close drains) | S6 |
@@ -2345,7 +2346,7 @@ writing. The calendar of §1.2 assumes:
 
 | Milestone | Tasks [I] | Changed lines [I] | Weeks [I] |
 |---|---|---|---|
-| MS1 | 18 in 16 review units, plus 3 stretch (M0, a main-session docs task, not counted) | about 22.9 k (§5.2.3, copies excluded) | 4 |
+| MS1 | 18 in 16 review units, plus 3 stretch (M0, a main-session docs task, not counted) | about 22.8 k (§5.2.3, copies excluded) | 4 |
 | MS2a | about 11 (C1q1, C1q2 and the shared join added) | about 9.7 k (with the black fill, about 265; C-BRIDGE's recognition, 120; `rx_to_framework`, 200; `MTL_CONVERT_CHECK` and its test) | 4 |
 | MS2b | about 8 (RB0–RB2) | about 6.45 k (6.3 k + the video RX `media_index`, 0.15 k, from MS3) | 3–4 |
 | MS3 | about 14: 13 + G1 (AUTO's move is a commit inside the time-events item) | about 11.5 k: 10 k − the RX `media_index` 0.15 k + G1 about 1.05 k + AUTO's move 0.44 k + the timing-subset additions 0.12 k + the suggestion rows and the name check 0.05 k | 3.5–4 (3.5 at four units a week) |

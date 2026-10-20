@@ -39,7 +39,7 @@ evidence names the tests and quotes the Gate 6 output.
 | S0 | todo | | | | |
 | T1 | todo | | | | |
 | H1b (series, parts 0–3) | todo | | | | |
-| E1 (series E1a–E1d) | todo | | | | |
+| E1 (series E1a–E1d) | todo | | | | E1a starts from D-248's written-out test, harness additions and MF1 hunk: `/home/labrat/wip/unified-api-impl/r0/design/e1a/verdict.md` §4 |
 | C0 | todo | | | | |
 | C1a (series of 2) | todo | | | | |
 | C1w | todo | | | | |
