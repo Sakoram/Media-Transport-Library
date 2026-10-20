@@ -76,8 +76,8 @@ budgets [§8.4](implementation-plan.md#84-performance-budgets), test isolation
   `CoreHandle.lease_base_after_reuse`.
 - **G-08** UB; MS1. Transmit order is submit order. Test: acquire A and B, submit B then A before
   pick-up: B is sent first. Today st20p numbers frames at `get_frame`
-  (`st20_pipeline_tx.c:806-808`) and the builder picks the lowest number
-  (`tx_st20p_newest_available`, `:62-77`, SF-44), so it would send A first; the core assigns `seq`
+  (`st20_pipeline_tx.c:815-817`) and the builder picks the lowest number
+  (`tx_st20p_newest_available`, `:64-79`, SF-44), so it would send A first; the core assigns `seq`
   at submit.
 - **G-09** UB; MS1. Results are in submission order, each with its `seq`. A unit done out of order
   holds its slot (W) until the older units are done, and its result waits too (D-209). Test:
@@ -148,7 +148,7 @@ budgets [§8.4](implementation-plan.md#84-performance-budgets), test isolation
   falls back to another pacing mode. Test: G-25: RX units with shifted arrival keep
   `media_tai_ns`. G-26: exact launches in the past, closer than the lead and beyond the horizon:
   `-MTL_ERANGE` with the reason, never another pacing mode; it pins today's silent fallback of
-  invalid exact requests (`st_tx_video_session.c:1796-1805`).
+  invalid exact requests (`st_tx_video_session.c:1813-1822`).
 - **G-27** M; BE; an exit criterion of MS4 (MS4a, MS4b). The launch schedule matches ST 2110-21 for
   the granted sender type within the accuracy profile. Test: EBU LIST or the timing parser with NIC
   timestamps, per NIC × pacing class; P per class once measured.

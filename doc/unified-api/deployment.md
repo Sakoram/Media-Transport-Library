@@ -142,7 +142,7 @@ descriptor from the event loop before `mtl_queue_close`.
 
 The meson option is independent of `buildtype` (`./build.sh debug` does not set it); it replaces
 today's TX mutation helpers, compiled into every debug build (`-DMTL_SIMULATE_PACKET_DROPS`,
-`lib/meson.build:91-96`). A release library keeps the `mtl_debug.h` entry points as stubs returning
+`lib/meson.build:101-106`). A release library keeps the `mtl_debug.h` entry points as stubs returning
 `-MTL_ENOTSUP`, so generated bindings still load, and links no fault or test-clock code; CI checks both
 builds. A debug-API library logs a warning at open and reports it in its stats.
 
@@ -310,7 +310,7 @@ The steps, what each does and what bounds it are [contract.md §2.4](contract.md
 In step 5, MtlManager grants (CPUs, queues, flows, XDP references) are returned by closing the
 connection, after step 4: a grant returned while still in use is the double booking in today's
 `mtl_uninit`, where `mt_sch_mrg_uinit` releases the lcores before it frees the schedulers still
-polling them (`mt_sch.c:1022-1030`).
+polling them (`mt_sch.c:1017-1025`).
 
 - **Stuck threads.** A thread stuck in foreign code past the deadline is not joined, and the memory it
   can reach is not freed; nor is memory a thread still inside a data call can reach.
@@ -555,7 +555,7 @@ never silently and never inside a join:
 
 | Request | When | Failure |
 |---|---|---|
-| `port.promiscuous` (2110), or any other port setting that needs promiscuous or all-multicast, on a VF the probe found untrusted | open, after the probe | `-MTL_ENOTSUP`, reason `VF_UNTRUSTED` (612). Today `rte_eth_promiscuous_enable` is called and its result ignored (`dev/mt_dev.c:1292-1296`), so an untrusted VF stays filtered without a word |
+| `port.promiscuous` (2110), or any other port setting that needs promiscuous or all-multicast, on a VF the probe found untrusted | open, after the probe | `-MTL_ENOTSUP`, reason `VF_UNTRUSTED` (612). Today `rte_eth_promiscuous_enable` is called and its result ignored (`dev/mt_dev.c:1322-1326`), so an untrusted VF stays filtered without a word |
 | one multicast group past the VF's filter budget (about 16 on an untrusted E810 VF, §4.1) | session create, or `mtl_session_update` with `MTL_UPDATE_FLOWS` (make-before-break holds both groups' filters for a moment; keep two of the VF's about 16 free) | `-MTL_ENOSPC`, reason `MCAST_FILTERS` (115) |
 
 MTL never sets the VF MAC (`mac` in `mtl_port_spec` is output only); the PF and the CNI own it.
@@ -818,21 +818,21 @@ What the audit found, with the engine fix that removes it ([engine.md](engine.md
 | 2–3 | opt-in phc2sys steers the node's `CLOCK_REALTIME` (`ADJ_SETOFFSET`, `ADJ_FREQUENCY`, `ADJ_TICK`) and never restores it; the PTP client leaves its frequency offset on a shared PF PHC | `mt_ptp.c:163-240`, `:358-390` | EK10 |
 | 4 | MtlManager resolves a pod's ifindex in its own namespace | [engine.md §7.3](engine.md#73-pod-hazards-h-k) | EK5 |
 | 5 | manager restart: no reconnect, live rules wiped | [engine.md §7.3](engine.md#73-pod-hazards-h-k) | EK5 |
-| 6–7, 24 | manager: only SIGINT handled, so SIGTERM kills it without cleanup **[inferred]**; socket `0777`, identity self-reported; a second manager unlinks the live socket | `manager/mtl_manager.cpp:57-61`, `:85`, `:96`; `manager/mtl_instance.hpp:191-213` | EK5 |
+| 6–7, 24 | manager: only SIGINT handled, so SIGTERM kills it without cleanup **[inferred]**; socket `0777`, identity self-reported; a second manager unlinks the live socket | `manager/mtl_manager.cpp:57-61`, `:101`, `:96`; `manager/mtl_instance.hpp:191-213` | EK5 |
 | 8 | library manager I/O: no timeout, no `MSG_NOSIGNAL`; a missing manager silently selects the shm allocator | `mt_instance.c:17`, `:24`, `:69`, `:91`; `mt_main.c:484` | EK4 |
-| 9 | CPU allocators keyed by remapped lcore ID (`--remap-lcore-ids`), not CPU | `manager/mtl_lcore.hpp:11-55`; `mt_sch.c:744-760`; `dev/mt_dev.c:443-446` | EK6 |
-| 10 | SysV lcore table (`ftok("/dev/null", 21)`, `/tmp/kahawai_lcore.lock`) with `kill(pid, 0)` and hostname checks; the clean tool clears nothing | `mt_sch.c:505-525`, `:550-556`, `:685-699`, `:1308-1333`; `mt_platform.h:57` | EK6 |
+| 9 | CPU allocators keyed by remapped lcore ID (`--remap-lcore-ids`), not CPU | `manager/mtl_lcore.hpp:11-55`; `mt_sch.c:742-758`; `dev/mt_dev.c:443-446` | EK6 |
+| 10 | SysV lcore table (`ftok("/dev/null", 21)`, `/tmp/kahawai_lcore.lock`) with `kill(pid, 0)` and hostname checks; the clean tool clears nothing | `mt_sch.c:505-525`, `:548-554`, `:683-697`, `:1292-1317`; `mt_platform.h:57` | EK6 |
 | 11 | `lcores` without `main_lcore` puts CPU 0 in `-l`; a worker CPU outside the cpuset is `rte_panic` | `dev/mt_dev.c:430-441`; DPDK `eal.c:838-843`, `:878-881` | EK7 |
 | 12 | `numa_bind` rewrites the caller's affinity and memory policy | `mt_main.c:448-461` | EK13 |
-| 13 | unbounded stop waits: `sch_stop`, `rte_eal_wait_lcore`, `mt_handle_drain`, `flock`, manager `recv` | `mt_sch.c:316-321`, `:517`; `mt_handle_guard.h:130`; `mt_instance.c:24` | EK1 |
-| 14 | tasklet unregister times out at 1 s with `-EIO`, callers free anyway: use-after-free **[inferred]** | `mt_sch.c:885-901`; `st2110/st_tx_video_session.c:3902-3914` | EK2 |
-| 15 | st20p TX free waits up to about 1 s per held frame; 16 sessions × 3 frames ≈ 48 s **[inferred]** | `st2110/pipeline/st20_pipeline_tx.c:722-753` | EK1 |
+| 13 | unbounded stop waits: `sch_stop`, `rte_eal_wait_lcore`, `mt_handle_drain`, `flock`, manager `recv` | `mt_sch.c:314-319`, `:515`; `mt_handle_guard.h:130`; `mt_instance.c:24` | EK1 |
+| 14 | tasklet unregister times out at 1 s with `-EIO`, callers free anyway: use-after-free **[inferred]** | `mt_sch.c:883-899`; `st2110/st_tx_video_session.c:3921-3933` | EK2 |
+| 15 | st20p TX free waits up to about 1 s per held frame; 16 sessions × 3 frames ≈ 48 s **[inferred]** | `st2110/pipeline/st20_pipeline_tx.c:730-761` | EK1 |
 | 16 | no SIGTERM path | [engine.md §7.3](engine.md#73-pod-hazards-h-k) | ex16 recipe |
 | 17 | `mt_mcast_uinit` frees the group list without leaves; no gratuitous ARP at start | `mt_mcast.c:527-559`, leaves only at `:735-743` | EK9 |
 | 18 | VF rate-limit state in the PF stays until a VF reset | `patches/ice_drv/2.6.7/0001-*.patch` | EK16 |
 | 19 | AF_XDP `tx_maxrate` left on the queue; UDP filter refcounts per interface, not per client | `dev/mt_af_xdp.c:867-892`; `manager/mtl_instance.hpp:272-287` | EK5 |
-| 20 | open blocks: link 30 s (the header comment's 90 s is wrong), ARP 60 s, PTP 180 s; `mtl_init` cannot be retried in-process | `dev/mt_dev.c:815-850`, `:500-503`; `mt_arp.c:171-203`; `st2110/st_tx_video_session.c:374-376` | EK18 |
-| 21 | no heartbeat; the stat thread reads and resets counters without a lock | `mt_sch.c:162`, `:462-484` | EK11 |
+| 20 | open blocks: link 30 s (the header comment's 90 s is wrong), ARP 60 s, PTP 180 s; `mtl_init` cannot be retried in-process | `dev/mt_dev.c:845-880`, `:500-503`; `mt_arp.c:171-203`; `st2110/st_tx_video_session.c:391-393` | EK18 |
+| 21 | no heartbeat; the stat thread reads and resets counters without a lock | `mt_sch.c:160`, `:460-482` | EK11 |
 | 22 | kernel-socket ARP busy-spins on a failing `sendto`; `mtl_abort` cannot stop it | `mt_socket.c:323-328` | EK3 |
 | 23 | `kahawai.json` in the working directory can `dlopen` plugins | `mt_config.c:52-61` | EK12 |
 | 25 | SKB-mode XDP never detached: the mode is overwritten to NATIVE | `manager/mtl_interface.hpp:420-430` | EK5 |
@@ -878,15 +878,15 @@ The requirement coverage K-REQ-1…20 is [requirements.md](requirements.md) §5.
   | slot table, rings, stats | the slot table with its descriptor ring and meta areas (video 1 332 B per slot), three counter blocks of about 0.8 KB, one more per foreign scheduler that completes the session's units (engine.md §1.8) | about 10–35 KB per video session *(est.)* |
   | ANC wire areas | `pool_count` × round_up(16 × (P + 2) + min(328 × P, 13 × P + ⌈5 × W / 4⌉), 64) | 8 960 B at the defaults |
 
-  The mempools of today's engines: `st_tx_video_session.c:2929-2995`, `st_tx_audio_session.c:1836`,
-  `:1863`, `st_tx_ancillary_session.c:1505`, `:1531`, `st_tx_fastmetadata_session.c:1252`, `:1278`.
+  The mempools of today's engines: `st_tx_video_session.c:2947-3013`, `st_tx_audio_session.c:1835`,
+  `:1863`, `st_tx_ancillary_session.c:1590`, `:1616`, `st_tx_fastmetadata_session.c:1252`, `:1278`.
   A pool holds 2 047 mbufs at today's sizes (`mt_util.c:533`), and its cache table is
   `RTE_MAX_LCORE` (128) × 8 256 B (`MT_MBUF_CACHE_SIZE` 128).
 - **Examples** *(est.)*. A 2160p 4:2:2 10-bit sender converting from `MTL_APP_YUV422P10LE` with
   `pool_count` 3 holds 3 transport frames (20.7 MB each) and 3 app-format frames (33.2 MB each):
   162 MB against 62 MB direct, and 62 MB with `MTL_SESSION_TX_SRC_PLANES`, the FFmpeg and GStreamer
   sinks that copy from their own frames; 30 such sessions need 4.9 GB, or 1.9 GB (st20p passes its
-  own frame count to the transport, `st20_pipeline_tx.c:455`, RX `st20_pipeline_rx.c:564`). 512
+  own frame count to the transport, `st20_pipeline_tx.c:463`, RX `st20_pipeline_rx.c:566`). 512
   audio senders with their own pools need about 2.3 GB, almost all of it mempools; with
   `port.tx_mono_pool` about 10 MB. For dense audio and ANC set `port.tx_mono_pool` and
   `port.rx_mono_pool` (2117); engine change E17 (MS4) drops the cache tables of the

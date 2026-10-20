@@ -323,7 +323,7 @@ the picture of this timeline is in
 - `ST21_PACING_WIDE` keeps the gapped TRS, although ST 2110-21:2022 §7.1.4 requires type W to use the linear PRS; a
   receiver checking W against a linear schedule sees the stream run ahead during the active period *(inferred)*.
   `ST21_PACING_LINEAR` (type NL) is read nowhere in `lib/` (grep), so an NL session is sent exactly as type N.
-- The interlaced constants come from the same height switch as the parser (`st_tx_video_session.c:507-516`): 480i uses
+- The interlaced constants come from the same height switch as the parser (`st_tx_video_session.c:524-533`): 480i uses
   RACTIVE 487/525 where ST 2110-21:2022 Table 1 gives HEIGHT/525, and a 486-line 525 stream gets RACTIVE 576/625 and the
   1125-line TRODEFAULT. The gapped schedule is applied to every raster, also those outside ST 2110-21:2022 §6.3.1.
 - `double frame_time` for 1001 rates is ≈ 6.2e-10 ns per frame too long; at today's N ≈ 1.07e11 (59.94) the epoch is
@@ -698,7 +698,7 @@ For an epoch-aligned SDI source (ST 2059-1 §6.2, §7.4) and a stream under ST 2
   VRX_FULL (8 or 9 packets) and never lets CINST exceed CMAX (ST 2022-8 §6; ST 2110-21 §6.6, §7.1.3); a gapped schedule
   is non-compliant. Packet j's RTP precedes its launch by at most about `(P − HA)/SR + TROFFSET` (launch no later than
   the drain), never "in the future".
-- **Size and SDP.** 1396–1456 B RTP packets, DF set (MTL sets DF: `st_tx_video_session.c:947`); `TP=2110TPNL` (or
+- **Size and SDP.** 1396–1456 B RTP packets, DF set (MTL sets DF: `st_tx_video_session.c:964`); `TP=2110TPNL` (or
   `2110TPW`) and `TROFF` in the SDP the application writes (§5).
 - **Redundancy.** Both legs carry identical RTP bytes, VSID included (ST 2022-7 §6 note); §12.
 
@@ -737,7 +737,7 @@ What MTL must meet:
   breaks §6, one more reason RTP comes from media time only.
 - **RX window, frame units.** A class X receiver keeps a unit open, and a duplicate recognisable, for at least the class PD
   after the earlier leg. Legacy video RX has two slots on a redundant session (`ST_RX_VIDEO_REDUNDANT_SLOT_NUM` = 2,
-  `st_rx_video_session.h:16`, set at `st_rx_video_session.c:700`) and evicts the older slot at a new timestamp
+  `st_rx_video_session.h:18`, set at `st_rx_video_session.c:711`) and evicts the older slot at a new timestamp
   (`:1214-1221`): a lagging leg's packet of frame N is lost once the leading leg starts N + 2, so it tolerates
   `PD < (2 − RACTIVE) × TFRAME` ≈ 17.4 ms at 59.94p and 20.8 ms at 50p but only 8.7 ms at 119.88p, below class A
   *(inferred from the code)*. Slots needed: `ceil(PD / TFRAME + RACTIVE)`: class A 2 at ≤ 60 fps, 3 at 119.88; class B 4
@@ -928,19 +928,19 @@ The source URLs are §17.
 | 11 | ns rounding ties | — | contract draft: ties to the later ns; code `st_muldiv_u64_round_closest` (`st_fmt.c:951`): ties down | open ([timing.md §16.2](timing.md#162-oracle-and-contract)) |
 | 12 | RX parser | ST 2110-21:2022 §6.6 VRX and CINST; RP 2110-25:2023 §4.4, §4.9.2 | per-frame CINST reset, TROFF ignored, floor frame index, `double` (as LIST); height-switched SD constants | §6.4 table; the parser is kept |
 | 13 | SDP | `ts-refclk`, `mediaclk` and TP required, TROFF when not the default, TSMODE and TSDELAY recommended (ST 2110-10:2022 §8.2, §8.3, §8.7; ST 2110-21:2022 §6.2, §8.1) | none emitted; apps can query little beyond `st20_tx_get_pacing_params()` | `info.*` stats; `mtl_sdp_render` (`mtl_sdp.h`) Phase 7 |
-| 14 | ANC keep-alive | one RTP packet per frame, field or PsF segment; without ANC, `ANC_Count` = 0 with the marker set (-40:2023 §5.5) | nothing sent when the app has no ANC frame (`st_tx_ancillary_session.c:942-946`) | E7, G-61 |
-| 15 | ANC transmit window | no later than TFST + TEPO + TD (1 ms CTM, 8 lines LLTM) and no earlier than one frame before (-40:2023 §6.4, §6.5) | packets spread over the whole frame period (`st_tx_ancillary_session.c:1108`) | E7 (timing.md §9.2) |
-| 16 | ST22 packet count | constant bytes and packets per frame (-22:2022 §4); `b=AS` from the constant frame size (§7.3) | packets follow the codestream (`st_tx_video_session.c:2481-2485`), TRS recomputed per frame (`:750-757`) | `MTL_CVIDEO_CBR` default (timing.md §5.3) |
+| 14 | ANC keep-alive | one RTP packet per frame, field or PsF segment; without ANC, `ANC_Count` = 0 with the marker set (-40:2023 §5.5) | nothing sent when the app has no ANC frame (`st_tx_ancillary_session.c:1023-1027`) | E7, G-61 |
+| 15 | ANC transmit window | no later than TFST + TEPO + TD (1 ms CTM, 8 lines LLTM) and no earlier than one frame before (-40:2023 §6.4, §6.5) | packets spread over the whole frame period (`st_tx_ancillary_session.c:1193`) | E7 (timing.md §9.2) |
+| 16 | ST22 packet count | constant bytes and packets per frame (-22:2022 §4); `b=AS` from the constant frame size (§7.3) | packets follow the codestream (`st_tx_video_session.c:2498-2502`), TRS recomputed per frame (`:767-774`) | `MTL_CVIDEO_CBR` default (timing.md §5.3) |
 | 17 | audio 80 µs ptime | `a=ptime:0.08` is 4 samples at 48 kHz (8 at 96 kHz), a packet every 83⅓ µs; RTP clock = sampling rate (-31:2022 §5.5, §6.1 Table 1 and note 1) | 4 (8) samples (`st_fmt.c:1172-1174`, `:1197-1199`) every 80 000 ns (`st_fmt.c:1111-1113`): a 50 kHz (100 kHz) sample rate, +4.17 %, ≈ 41.7 ms per second against PTP | SF-35 (timing.md §8) |
 | 18 | ST 2022-6 | 1396–1456 B RTP packets, a 27 MHz timestamp per packet, NL or W linear shaping (ST 2022-6 §6.2–§6.4; ST 2022-8 §6; §11) | rejected above `MTL_PKT_MAX_RTP_BYTES` = 1352 B (`include/mtl_api.h:89`); `README.md:46` claims support | PE7, DD-19; per-packet timestamps (§11.2) |
-| 19 | ST 2022-7 RX skew | class A reconstructs at PD ≤ 10 ms (ST 2022-7 §7 Table 1) | two frame slots on a redundant video session: PD < (2 − RACTIVE)·TFRAME, 8.7 ms at 119.88p (`st_rx_video_session.h:16`, `st_rx_video_session.c:1214-1221`) | slots from `rx.skew_budget_ns` (§12) |
+| 19 | ST 2022-7 RX skew | class A reconstructs at PD ≤ 10 ms (ST 2022-7 §7 Table 1) | two frame slots on a redundant video session: PD < (2 − RACTIVE)·TFRAME, 8.7 ms at 119.88p (`st_rx_video_session.h:18`, `st_rx_video_session.c:1241-1248`) | slots from `rx.skew_budget_ns` (§12) |
 | 20 | PTP master selection | default BMCA, `announceReceiptTimeout` 3, domain 127 (ST 2059-2 §5.2, §5.5.1) | the first Announce is the master forever, no timeout, any domain (`mt_ptp.c:1036-1047`, `:1017`) | `time.ptp_domain`, `time.ptp_announce_timeout` and a BMCA in the built-in client, or ptp4l (`MTL_TIME_SOURCE_PHC`) (§13.3) |
 | 21 | PTP slave behaviour | one- and two-step masters (§5.6), any profile message rate (ST 2110-10 §7.2), SM TLV management messages (§5.13) | two-step only; servo gain fixed for 0.25 s Sync; UTC offset frozen at the first Announce; an `err()` line per management message (`mt_ptp.c:449`, `:1038`, `:1479-1481`) | §13.3 |
 | 22 | ANC user data words | 10-bit UDWs; parity binds only DID, SDID/DBN and DC, UDW coding is the application's (ST 291-1:2011 §6.1–§6.6) | TX writes each UDW as 8 bits plus parity (`st_ancillary.c:234`); RX drops the ANC packet on a UDW parity miss and keeps 8 bits (`:270-271`) | 8-bit stays the default; a 10-bit UDW mode (§9) |
-| 23 | video RX RTP header | receivers tolerate CSRCs and header extensions (ST 2110-10:2022 §6.2; ST 2110-20:2022 §6.1.2) | the payload header is read at a fixed offset behind a 12-byte RTP header; CC and X are not looked at, so such a packet is misparsed (`st_rx_video_session.c:1570-1574`) | parse CC and X in the video RX path (SF-68, MS2) |
-| 24 | video RX SRDs | up to three SRD headers; every packing mode (ST 2110-20:2022 §6.2.1, §6.3.1) | two SRDs parsed; a packet with a third fails the length check and is dropped (`st_rx_video_session.c:1694-1703`); the second SRD's row and offset never place data (`:1799-1803`, `:1825-1826`), only the callback reads them (`:1789-1793`) | three SRDs, each at its own row and offset (SF-76, MS2) |
-| 25 | SD interlaced constants | RACTIVE `HEIGHT/525`, TRODEFAULT by Table 1 (ST 2110-21:2022 §6.3.3); 525-line heights 480–486 (RP 2110-24:2023 §4.3) | 487/525 at 480i; a 486-line stream gets 576/625 and the 1125-line TRODEFAULT (`st_tx_video_session.c:507-516`, `st_rx_timing_parser.c:317-332`) | constants from HEIGHT (SF-74, with E5) |
-| 26 | gapped schedule scope | gapped PRS only for BT.656/BT.1543/BT.1847/BT.709/BT.2020 formats (ST 2110-21:2022 §6.3.1) | type N gapped pacing for any raster (`st_tx_video_session.c:502-519`) (legacy); unified: from MS2a granted W off the §6.3.1 formats until E5a (MS5), then NL (D-143) | type N refused, or NL granted, outside those formats (timing.md §5.1; SF-73, with E5) |
+| 23 | video RX RTP header | receivers tolerate CSRCs and header extensions (ST 2110-10:2022 §6.2; ST 2110-20:2022 §6.1.2) | the payload header is read at a fixed offset behind a 12-byte RTP header; CC and X are not looked at, so such a packet is misparsed (`st_rx_video_session.c:1674-1678`) | parse CC and X in the video RX path (SF-68, MS2) |
+| 24 | video RX SRDs | up to three SRD headers; every packing mode (ST 2110-20:2022 §6.2.1, §6.3.1) | two SRDs parsed; a packet with a third fails the length check and is dropped (`st_rx_video_session.c:1798-1807`); the second SRD's row and offset never place data (`:1799-1803`, `:1825-1826`), only the callback reads them (`:1893-1897`) | three SRDs, each at its own row and offset (SF-76, MS2) |
+| 25 | SD interlaced constants | RACTIVE `HEIGHT/525`, TRODEFAULT by Table 1 (ST 2110-21:2022 §6.3.3); 525-line heights 480–486 (RP 2110-24:2023 §4.3) | 487/525 at 480i; a 486-line stream gets 576/625 and the 1125-line TRODEFAULT (`st_tx_video_session.c:524-533`, `st_rx_timing_parser.c:317-332`) | constants from HEIGHT (SF-74, with E5) |
+| 26 | gapped schedule scope | gapped PRS only for BT.656/BT.1543/BT.1847/BT.709/BT.2020 formats (ST 2110-21:2022 §6.3.1) | type N gapped pacing for any raster (`st_tx_video_session.c:519-536`) (legacy); unified: from MS2a granted W off the §6.3.1 formats until E5a (MS5), then NL (D-143) | type N refused, or NL granted, outside those formats (timing.md §5.1; SF-73, with E5) |
 | 27 | HANC on the vertical alignment line before the alignment point | its TLBO is from the most recent alignment point, a frame earlier (ST 2110-40 §6.2.1) | MTL times it from its own frame's alignment point | D-148 (no producer means the literal reading) |
 
 The legacy pacing contract draft agrees with the standards where it says "RTP describes the content, pacing chooses

@@ -138,7 +138,7 @@ because the pipeline ops and frame structs embed these types (§4).
 
 | U-ID | Legacy | Unified home | When | Notes |
 |---|---|---|---|---|
-| U-075 | shared TX queue: `MTL_FLAG_SHARED_TX_QUEUE` | `MTL_OPT_TX_QUEUE = MTL_TXQ_SHARED` (`session.tx_queue`) on the instance: the default of its sessions (contract.md §12.4); a session's own wins | MS1 | Co; SMP 1, RXTX 1, RS 1. Today it forces TSC pacing for the whole port (`mt_dev.c:1446-1450`) |
+| U-075 | shared TX queue: `MTL_FLAG_SHARED_TX_QUEUE` | `MTL_OPT_TX_QUEUE = MTL_TXQ_SHARED` (`session.tx_queue`) on the instance: the default of its sessions (contract.md §12.4); a session's own wins | MS1 | Co; SMP 1, RXTX 1, RS 1. Today it forces TSC pacing for the whole port (`mt_dev.c:1476-1480`) |
 | U-076 | shared RX queue: `MTL_FLAG_SHARED_RX_QUEUE` | `MTL_OPT_SHARED_RX_QUEUE` | MS1 | R; SMP 1, RXTX 1, RS 1 |
 | U-077 | RX through the CNI queue: `MTL_FLAG_RX_USE_CNI` | `MTL_OPT_RX_USE_CNI` | MS1 | R; RXTX 1 |
 | U-078 | flow rules on UDP port only: `MTL_FLAG_RX_UDP_PORT_ONLY` | `MTL_OPT_RX_UDP_PORT_ONLY` | MS1 | R; RXTX 1 |
@@ -357,7 +357,7 @@ because the pipeline ops and frame structs embed these types (§4).
 | U-268 | RFC 8331 helpers: `st40_get_udw`, `st40_set_udw`, `st40_calc_checksum`, `st40_add/check_parity_bits`, `st40_rfc8331_*` | `mtl_anc_udw_get/set`, `mtl_anc_parity`, `_parity_ok`, `mtl_anc_checksum`, `mtl_anc_rfc8331_bytes`, `_encode`, `_decode`, `mtl_anc_table`, `_words`, `_raw_hdr`, `_put` (`mtl_util.h`, `static inline`) | MS1 | Co; RXTX 2, GST 1, KT 2, UT 3; S! (H-13) |
 | U-269 | session-level ANC: `st40_tx_ops.get_next_frame` + `st40_frame`, `st40_rx_ops.notify_frame_ready`, `st40_rx_put_framebuff` | as U-181, U-201 | MS4 | R; RXTX 1, KT 2, UT 5; S!. CHANGED |
 | U-270 | ANC user pacing, timestamp, exact: `ST40(P)_TX_FLAG_USER_PACING/USER_TIMESTAMP/EXACT_USER_PACING` | as U-151 … U-153 | MS6 | R; RXTX 1, GST 1, KT 2 |
-| U-271 | `ST40P_*_FLAG_FORCE_NUMA` ("NOT SUPPORTED YET", `st40_pipeline_api.h:117-121`) | none | removed (D-87, CUT-11) | L; none |
+| U-271 | `ST40P_*_FLAG_FORCE_NUMA` ("NOT SUPPORTED YET", `st40_pipeline_api.h:121-125`) | none | removed (D-87, CUT-11) | L; none |
 | U-272 | `st40p_rx_ops.rtp_ring_size` (documented mandatory, unused) | none | removed (D-87, CUT-11) | L; none |
 | U-420 | ANC with 10-bit words or verbatim relays | `n.word_mode` 10BIT, RAW | MS4a2 | new (SF-78) |
 
@@ -478,13 +478,13 @@ this section is the inventory behind it.
 | `st_convert_api.h` ← `st_convert_internal.h` (`:13`) ← `st20_api.h`, `st30_api.h` (`:13-14`); `st20_combined_api.h` ← `st20_api.h` (`:12`); `mtl_sch_api.h`, `mtl_lcore_shm_api.h` ← `mtl_api.h` (`:12`) | the headers |
 | function counts: `mtl_api.h` 70, `st_api.h` 12, `st20_api.h` 51 (ST20 and ST22), `st30_api.h` 23, `st40_api.h` 27, `st41_api.h` 16, `st_pipeline_api.h` 106, `st30_pipeline_api.h` 24, `st40_pipeline_api.h` 27, `mtl_sch_api.h` 6, `mtl_lcore_shm_api.h` 2, convert 47 + 58 (≈ 40 public `static inline` wrappers call `*_simd`, `st_convert_api.h:41-45`), `st20_combined_api.h` 6 | `-aux-info` |
 | type leakage: `st_pipeline_api.h` uses `st_fps`, `st10_timestamp_fmt`, `st_frame_status`, `st_event`, `st10_vsync_meta`, `st_queue_meta`, `st_pcap_dump_meta`, `st_tx_dest_info`, `st_rx_source_info`, `st21_pacing`, `st20_packing`, `st20_fmt`, `st22_pack_type`, RTCP ops, detect meta, `st20_rx_tp_meta` (in `st_frame`, `:321`) | `st_pipeline_api.h:288-2176` |
-| the st30/st40 pipelines take `st_tx_port`/`st_rx_port` from `st_pipeline_api.h` (`st30_pipeline_api.h:111`, `:274`; `st40_pipeline_api.h:140`, `:224`), which drags in all of `st20_api.h`; st40p uses `st40_meta` (`:24`), `st40_tx_test_config` (`:155`) | the headers |
-| the plugin ABI uses `mtl_handle` (`st_plugin_create_fn`, `:89`), `st_frame_fmt`, `struct st_frame`, `st_plugin_device`, `st22_quality_mode`, 64-bit caps masks; the convert API uses pgroup structs, `st31_am824`/`st31_aes3`, `mtl_simd_level`, `mtl_udma_handle` | `st_pipeline_api.h:85-95`, `:670-830`; `st_convert_api.h:13`, `:44`, `:1064`; internal `:48` |
+| the st30/st40 pipelines take `st_tx_port`/`st_rx_port` from `st_pipeline_api.h` (`st30_pipeline_api.h:114`, `:274`; `st40_pipeline_api.h:144`, `:224`), which drags in all of `st20_api.h`; st40p uses `st40_meta` (`:24`), `st40_tx_test_config` (`:155`) | the headers |
+| the plugin ABI uses `mtl_handle` (`st_plugin_create_fn`, `:89`), `st_frame_fmt`, `struct st_frame`, `st_plugin_device`, `st22_quality_mode`, 64-bit caps masks; the convert API uses pgroup structs, `st31_am824`/`st31_aes3`, `mtl_simd_level`, `mtl_udma_handle` | `st_pipeline_api.h:85-95`, `:676-836`; `st_convert_api.h:13`, `:44`, `:1064`; internal `:48` |
 | ecosystem pipeline users need session types: GStreamer `st20_rx_frame_meta` (`gst_mtl_st20p_rx.c:140`), `st30_calculate_framebuff_size` (`gst_mtl_st30p_rx.c:229`), st40 UDW/parity (`gst_mtl_st40p_tx.c:706-707`); FFmpeg `st30_calculate_framebuff_size` (`mtl_st30p_rx.c:126`) and the session flag `ST20_RX_FLAG_DMA_OFFLOAD` on st20p ops (`mtl_st20p_rx.c:176`, a misuse) | the plugins |
-| ABI hygiene: no `-fvisibility`, no version script, no export macro; 757 dynamic symbols, about 228 internal `mt_*`; soname plain `libmtl.so`; the Windows `.def` generated from every export; `ALLOW_EXPERIMENTAL_API` set for lib only | `lib/meson.build:85-87`, `:151-159`, `:122-123`, `:8` |
-| deprecation: `__mtl_deprecated_msg()` on fields only, never functions; a no-op under `__MTL_PYTHON_BUILD__`, silenced in the library by `__MTL_LIB_BUILD__` | `include/mtl_api.h:141-147`, `:745-759`; `meson.build:30` |
+| ABI hygiene: no `-fvisibility`, no version script, no export macro; 757 dynamic symbols, about 228 internal `mt_*`; soname plain `libmtl.so`; the Windows `.def` generated from every export; `ALLOW_EXPERIMENTAL_API` set for lib only | `lib/meson.build:95-97`, `:151-159`, `:132-133`, `:8` |
+| deprecation: `__mtl_deprecated_msg()` on fields only, never functions; a no-op under `__MTL_PYTHON_BUILD__`, silenced in the library by `__MTL_LIB_BUILD__` | `include/mtl_api.h:141-147`, `:746-760`; `meson.build:30` |
 | `lib/src` uses the installed headers through `st_header.h:9-15`; `mt_main.h:24-25` includes `mtl_sch_api.h`, `mt_sch.c:15` `mtl_lcore_shm_api.h`; include path `include_directories('.', 'include')`, so moving the files needs one include-path change and no source edit | `lib/src/st2110/st_header.h`, `meson.build:57` |
-| the pipelines create sessions through the session API, which therefore stays the internal engine | `st20_pipeline_tx.c:482`, `:963`; `st20_pipeline_rx.c:599`, `st22_pipeline_tx.c:527`, `st30_pipeline_tx.c:300`, `st40_pipeline_rx.c:186` |
+| the pipelines create sessions through the session API, which therefore stays the internal engine | `st20_pipeline_tx.c:490`, `:972`; `st20_pipeline_rx.c:601`, `st22_pipeline_tx.c:557`, `st30_pipeline_tx.c:310`, `st40_pipeline_rx.c:188` |
 
 No consumer outside the library uses `manager/`; `ld_preload/` has no sources (`ld_preload/meson.build`
 only, removed in `2b182cd87`).
@@ -503,13 +503,13 @@ The U-row of §2 gives the symbol and the milestone.
 | V6 | TX ext frame `st20_tx_set_ext_frame` `:1882`, `ST20_TX_FLAG_EXT_FRAME` `:45` | samples ×4, `v4l2_to_ip.c:1457`, KT `st20_common.cpp:148` | COVERED (U-184); a new layout per acquire: `mtl_tx_acquire_layout` (U-185) |
 | V7 | RX static `ext_frames[]` `:1550` | KT | COVERED (U-208) |
 | V8 | RX `query_ext_frame` `:1599` (needs `RECEIVE_INCOMPLETE_FRAME`) | KT `st20/st20_ext_frame.cpp:203`; MXL `poc/src/sender/mtl_rx.c:199`; GST via st20p (`gst_mtl_st20p_rx.c:140`) | COVERED (U-209, H-09) |
-| V9 | `uframe_pg_callback` + `uframe_size` `:1586`, `:1574` | RXTX `legacy/rx_video_app.c:593`; KT `st20_uframe.cpp:151`, `st20_detect.cpp:167` | CUT-2; per-packet conversion kept (`st_pipeline_api.h:590`, H-16) |
+| V9 | `uframe_pg_callback` + `uframe_size` `:1586`, `:1574` | RXTX `legacy/rx_video_app.c:593`; KT `st20_uframe.cpp:151`, `st20_detect.cpp:167` | CUT-2; per-packet conversion kept (`st_pipeline_api.h:596`, H-16) |
 | V10 | auto-detect `:219`, `notify_detected` `:1592` | RXTX `legacy/rx_video_app.c:534,550`; KT `st20_detect.cpp:171`; `rx_st20p_auto_detect_sample.c:195` | COVERED (U-212, H-06) |
 | V11 | timing parser STAT `:238` | RXTX `legacy/rx_video_app.c:565`; acceptance `tests/single/rx_timing` | COVERED (U-214) |
 | V12 | timing parser META `:243`, `:475`, `:2328` | `rx_st20p_timing_parser_sample.c:85`; Python `rx_timing_parser.py:135`; UT `st20_harness.h:147` | COVERED (U-215, H-07) |
 | V13 | RX DMA offload `:212`, `:2314` | RXTX, KT ×5, FF (misused flag) | COVERED (U-211) |
 | V14 | header split `:226` | RXTX `legacy/rx_video_app.c:560`; KT `st20_digest.cpp:155`; `ext_frame/rx_st20p_hdr_split_gpu_direct.c:311` | CUT-1 (NG6) |
-| V15 | GPU VRAM frames `:1624`; st20p `USE_GPU_DIRECT_FRAMEBUFFERS` (`st_pipeline_api.h:642`) | FF `mtl_st20p_rx.c:204-220`; `app/sample/gpu_direct/` | COVERED (U-117, H-10) |
+| V15 | GPU VRAM frames `:1624`; st20p `USE_GPU_DIRECT_FRAMEBUFFERS` (`st_pipeline_api.h:648`) | FF `mtl_st20p_rx.c:204-220`; `app/sample/gpu_direct/` | COVERED (U-117, H-10) |
 | V16 | NACK retransmission `:87`, `:186`, `:1119`, `:1441` | RXTX `legacy/{tx,rx}_video_app.c:801/562`; KT `st20_digest.cpp:86,157`; `doc/rtcp.md` | COVERED (U-141, H-05) |
 | V17 | two RX threads `:249` | RXTX | COVERED (U-217) |
 | V18 | user pacing, exact, user timestamp, epoch RTP, RTP delta `:56-100` | KT `st20_user_pacing.cpp:75`, `tx_timestamp_sync_test.cpp:227`; `fwd/rx_st20_tx_st20_split_fwd.c:271` | COVERED (U-151…U-156) |
@@ -529,19 +529,19 @@ The U-row of §2 gives the symbol and the milestone.
 | CV3 | `DISABLE_BOXES` `:127`, `:266` | none (`git grep DISABLE_BOXES`) | CUT-6 |
 | CV4 | `ST22_PACK_SLICE` `:386-387` | none | COVERED (U-413) |
 | CV5 | ST22 RTCP, pcapng, queue meta, VSYNC, update | KT `st22_test.cpp:1327,1152,1412,740` | as V16, V24, V23, V19, V21 |
-| AU1 | audio frame sessions (`st30_api.h:676`, `:847`) | RXTX `legacy/{tx,rx}_audio_app.c:484/416`; KT `st30_test.cpp:372/563` | COVERED (U-244) |
+| AU1 | audio frame sessions (`st30_api.h:674`, `:845`) | RXTX `legacy/{tx,rx}_audio_app.c:484/416`; KT `st30_test.cpp:372/563` | COVERED (U-244) |
 | AU2 | audio RTP level (`:729-745`, `:902-913`) | RXTX `legacy/tx_audio_app.c:141`; KT `st30_test.cpp:72` | COVERED (U-343) |
 | AU3 | pacing way, RL warm-up, FIFO (`:178`) | RXTX | COVERED (U-247, U-248, U-250) |
 | AU4 | audio timing parser STAT/META (`:118` ff.) | RXTX `legacy/rx_audio_app.c:380,383` | CHANGED (U-254) |
 | AU5 | size helpers (`:756-832`) | FF `mtl_st30p_{rx,tx}.c:126/129`; GST `gst_mtl_st30p_rx.c:229`; Rust `audio.rs:215` | COVERED (U-245, U-246) |
 | AU6 | audio RTCP flags | RXTX `legacy/rx_audio_app.c:379` | CUT-7 |
 | AU7 | AM824/AES3 conversion (`st_convert_api.h:1064`) | — | COVERED (U-255) |
-| AN1 | ANC frame sessions, ≤ 20 meta (`st40_api.h:612`, `:725`) | RXTX `tx_ancillary_app.c:480`, `rx_ancillary_app.c:159` (main app, not legacy/); KT `st40_test.cpp:409/586` | COVERED (U-260, U-261) |
-| AN2 | ANC RTP level (`:695-711`, `:766-777`) | RXTX `tx_ancillary_app.c:147`, `rx_ancillary_app.c:67`; KT | COVERED (U-344) |
+| AN1 | ANC frame sessions, ≤ 20 meta (`st40_api.h:691`, `:802`) | RXTX `tx_ancillary_app.c:535`, `rx_ancillary_app.c:311` (main app, not legacy/); KT `st40_test.cpp:832/586` | COVERED (U-260, U-261) |
+| AN2 | ANC RTP level (`:695-711`, `:766-777`) | RXTX `tx_ancillary_app.c:168`, `rx_ancillary_app.c:169`; KT | COVERED (U-344) |
 | AN3 | RFC 8331 and UDW helpers (`:816-925`) | GST `gst_mtl_st40p_tx.c:655,706-707`; RXTX `rx_ancillary_app.c:17,30`; UT, fuzz | COVERED (U-268, H-13) |
 | AN4 | test mutation config (`:90-108`) | GST test element | COVERED (U-267) |
-| AN5 | split by packet, EXACT, DEDICATE_QUEUE | RXTX `tx_ancillary_app.c:475-478` | COVERED |
-| AN6 | ANC RTCP flags | RXTX `rx_ancillary_app.c:155` | CUT-7 |
+| AN5 | split by packet, EXACT, DEDICATE_QUEUE | RXTX `tx_ancillary_app.c:524-527` | COVERED |
+| AN6 | ANC RTCP flags | RXTX `rx_ancillary_app.c:294` | CUT-7 |
 | FM1 | fastmeta TX (`st41_api.h:377`) | RXTX `tx_fastmetadata_app.c:475`; acceptance `tests/single/st41` | COVERED (U-280) |
 | FM2 | fastmeta RX, RTP only (`st41_rx_ops` `:232`, `:501-512`) | RXTX `rx_fastmetadata_app.c:166,277` | COVERED (U-283, U-345) |
 | FM3 | DIT/K filters | RXTX | COVERED (U-282) |
@@ -551,21 +551,21 @@ The U-row of §2 gives the symbol and the milestone.
 | ST3 | `struct st_frame`, `st_ext_frame` | every pipeline consumer | COVERED (U-365) |
 | ST4 | `st_frame_fmt` (≈ 28 app formats) | GST `gst_mtl_st20p_tx.c:370,666`; OBS `mtl-output.c:217`; samples | COVERED (U-361) |
 | ST5 | `st_frame_*` helpers | samples, GST, plugins (`st_frame_fmt_name` ×10, `st_frame_plane_size` ×6) | COVERED (U-368) |
-| ST6 | `st_draw_logo` (`st_pipeline_api.h:2365`) | samples ×5, KT `st22p_test.cpp:435` | CUT-8 (sample-local code) |
+| ST6 | `st_draw_logo` (`st_pipeline_api.h:2367`) | samples ×5, KT `st22p_test.cpp:435` | CUT-8 (sample-local code) |
 | ST7 | `st_name_to_codec` | FF `mtl_st22p_rx.c:92` | COVERED (U-370) |
 | ST8 | SWIG setters `st_txp_*`, `st_rxp_*`, `mtl_para_*` | Python | COVERED (U-102, U-371) |
 | ST9 | port and user stats structs, `st_var_info` | RXTX | COVERED (U-033, U-400) |
 | ST10 | `st_rfc3550_rtp_hdr` | RTP-level users | COVERED (U-347) |
-| MT1 | log hooks (`mtl_api.h:1086`, `:1100`) | RXTX `args.c`, `rxtx_app.c` | COVERED (U-019…U-021, H-14) |
-| MT2 | lcore borrow (`mtl_api.h:1142`, `:1157`) | `app/perf/*` ×14, RXTX, KT `st_test.cpp` | CUT-5b |
-| MT3 | user DMA `mtl_udma_*` (`mtl_api.h:1400-1505`) | `app/sample/dma/dma_sample.c:24`, `app/perf/*`, KT `dma_test.cpp`, `cvt_test.cpp` | CUT-5 |
+| MT1 | log hooks (`mtl_api.h:1087`, `:1101`) | RXTX `args.c`, `rxtx_app.c` | COVERED (U-019…U-021, H-14) |
+| MT2 | lcore borrow (`mtl_api.h:1143`, `:1158`) | `app/perf/*` ×14, RXTX, KT `st_test.cpp` | CUT-5b |
+| MT3 | user DMA `mtl_udma_*` (`mtl_api.h:1401-1506`) | `app/sample/dma/dma_sample.c:24`, `app/perf/*`, KT `dma_test.cpp`, `cvt_test.cpp` | CUT-5 |
 | MT4 | hugepage and DMA memory (`mtl_dma_map` `:1310`) | samples, fwd | COVERED (U-110…U-113) |
 | MT5 | PTP read, time function, sync notify | RXTX, FF | COVERED (U-045, U-046, U-048) |
-| MT6 | `mtl_sch_enable_sleep`, `_set_sleep_us` | RXTX `rxtx_app.c:176`; KT `st20p_test.cpp:929` | COVERED (U-052, U-053, H-18) |
+| MT6 | `mtl_sch_enable_sleep`, `_set_sleep_us` | RXTX `rxtx_app.c:174`; KT `st20p_test.cpp:929` | COVERED (U-052, U-053, H-18) |
 | MT7 | `mtl_memcpy` (`:1185`, ≈ 60 files), `mtl_sleep_us`, `mtl_delay_us`, `mtl_thread_setname`, `mtl_size_page_align` | widely | CUT-8; `mtl_size_page_align`: U-114 |
 | MT8 | port and backend queries, manager alive, port stats, `mtl_abort` | samples, RXTX | COVERED (U-006, U-035, U-096, U-099) |
 | MT9 | SIMD level | perf tools | COVERED (U-066) |
-| X1 | user schedulers and tasklets (`mtl_sch_register_tasklet`, `mtl_sch_api.h:128`) | KT `sch_test.cpp:16,147` | CUT-10 (H-08) |
+| X1 | user schedulers and tasklets (`mtl_sch_register_tasklet`, `mtl_sch_api.h:127`) | KT `sch_test.cpp:16,147` | CUT-10 (H-08) |
 | X2 | `mtl_lcore_shm_print`/`clean` (`mtl_lcore_shm_api.h:44`, `:59`) | `app/tools/lcore_shmem_mgr.c:60,63` | internal tool; SysV table removed (D-92) |
 | X3 | ≈ 105 per-pair converters (`_simd`, `_simd_dma`, `_2way_cpuva`) | `app/tools/convert_app.c` (≈ 20), `app/perf/*`, RXTX `fmt.c:27`, `cvt_test.cpp` (≈ 70), `plugins/sample/convert_plugin_sample.c:24`, Python (`st_convert_internal.h:1423`) | COVERED by `mtl_convert` (CUT-4 for the per-pair functions) |
 | X4 | `st20rc` redundant-combined RX | `experimental/rx_st20_redundant_combined_sample.c:191`; RXTX `experimental/rx_st20r_app.c:341` | CUT-3 (two legs, D-59) |
@@ -585,7 +585,7 @@ The U-row of §2 gives the symbol and the milestone.
 | `app/v4l2_to_ip` | `st20_api.h` (`v4l2_to_ip.c:31`), session TX with ext frames | video TX with attached slots (MS2) |
 | `app/tools`, `app/perf` | lcore shm, convert, `*_simd_dma`, lcore borrow, udma | the internal dependency (in-tree tools) |
 | RxTxApp | session ANC and fastmeta apps in the main tree; legacy video, audio, st22; experimental st20rc; JSON kinds `video`, `audio`, `ancillary`, `fastmetadata`, `st22` (`tests/acceptance/mtl_engine/rxtxapp_config.py:20-41`) | `UnifiedRxTxApp` beside the frozen RxTxApp: `st20p` MS1, slice MS2, the other kinds MS4, RTP MS5; the JSON schema kept ([migration.md](migration.md) §9.1) |
-| KahawaiTest, unit, fuzz | 752 session call sites; unit and fuzz compile lib `.c` (`tests/unit/session/st20_harness.c:22`, `tests/fuzz/st20/st20_rx_frame_fuzz.c:26`; `tests/unit/meson.build:20-21`, `tests/fuzz/meson.build:43-44`) | not blockers: the internal dependency; they keep testing the engine |
+| KahawaiTest, unit, fuzz | 752 session call sites; unit and fuzz compile lib `.c` (`tests/unit/session/st20_harness.c:39`, `tests/fuzz/st20/st20_rx_frame_fuzz.c:39`; `tests/unit/meson.build:20-21`, `tests/fuzz/meson.build:43-44`) | not blockers: the internal dependency; they keep testing the engine |
 
 The acceptance suite hard-codes `.local_install` and RxTxApp's legacy JSON kinds, and an `#error`
 at stage F+1 breaks builds that include a legacy header only for a type (GStreamer
@@ -654,7 +654,7 @@ Today: five families × two directions × up to three units × two layers, plus 
 and 8 pipeline create functions, each with its own ops struct and flag space; all cells verified
 at `545a266a`). Pipeline flag bits are not aligned with session bits (`ENABLE_RTCP` is bit 2 in
 `ST20_RX_FLAG_*`, bit 4 in `ST20P_RX_FLAG_*`), so each pipeline translates flags one by one
-(`st20_pipeline_rx.c:508-546`). The mode-by-mode map with milestones is [migration.md](migration.md)
+(`st20_pipeline_rx.c:510-548`). The mode-by-mode map with milestones is [migration.md](migration.md)
 §4.16.
 
 | Feature | Where it exists today | Unified |
@@ -666,7 +666,7 @@ at `545a266a`). Pipeline flag bits are not aligned with session bits (`ENABLE_RT
 | drop when late | pipelines only | `MTL_OPT_LATE_POLICY` everywhere |
 | session stats | absent on ST22, st22p | one schema, ST22 included |
 | RTCP | ST20, ST22 (st20p, st22p); no effect on ST30/40/41 | NACK for video and cvideo; CUT-7 |
-| per-session pacing engine | ST30 and st30p only (video inherits the port's; ST22 always TSC, `st_tx_video_session.c:3396-3398`, `:3412-3414`) | `MTL_OPT_PACING` per session |
+| per-session pacing engine | ST30 and st30p only (video inherits the port's; ST22 always TSC, `st_tx_video_session.c:3414-3416`, `:3430-3432`) | `MTL_OPT_PACING` per session |
 | zero-copy TX | partial; ST22 always copies; st20p derive only | reported per unit (`MTL_TXR_COPIED`, `MTL_INFO_DIRECT`) |
 | app memory TX | ST20 session, st20p, st22p | attached pools for every essence |
 | incomplete delivery | a flag on ST20, ST22, ST30 and the pipelines; ST40 always | `MTL_OPT_RX_INCOMPLETE` everywhere |

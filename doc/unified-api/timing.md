@@ -37,7 +37,7 @@ its packets leave (§4, §5). The user's picture of the two is
 
 | # | Principle | Standards anchor | Today in MTL |
 |---|---|---|---|
-| T1 | One epoch, 1970-01-01 00:00:00 TAI; RTP clock offset zero: `rtp = floor(t × rate) mod 2^32` | ST 2059-1 §6.1, ST 2110-10 §7.3 | default time source is `CLOCK_REALTIME` (UTC) labelled TAI (`dev/mt_dev.c:2288`) |
+| T1 | One epoch, 1970-01-01 00:00:00 TAI; RTP clock offset zero: `rtp = floor(t × rate) mod 2^32` | ST 2059-1 §6.1, ST 2110-10 §7.3 | default time source is `CLOCK_REALTIME` (UTC) labelled TAI (`dev/mt_dev.c:2370`) |
 | T2 | The RTP timestamp is the unit's sampling (or intended) instant; for playback video `N × TFRAME` | ST 2110-10 §7.5, §7.6.3 | default video RTP is the packet-0 TX cursor `E(N) + TRO − VRX0·TRS`, +54.4…+55.7 ticks after `N × TFRAME` at 1080p59.94 (VRX0 9…5; note 1) |
 | T3 | The transmit grid is on the PTP timescale: `TVD = N × TFRAME + TROFFSET`, TROFFSET constant | ST 2110-21 §6.2 | EXACT user pacing accepts any per-frame target |
 | T4 | Exact arithmetic; truncate | ST 2059-1 §5.1, ST 2110-10 §7.6.1 | `double frame_time` (≈ +66 ns at today's TAI for 1001 rates) and round-to-nearest (`st_fmt.c:986-993`) |
@@ -45,7 +45,7 @@ its packets leave (§4, §5). The user's picture of the two is
 | T6 | Essences of one programme agree by TAI instant, not by buffer boundaries | ST 2110-10 §7.1, ST 2110-40 §5.4 | default ST20 and ST40 RTP differ for the same frame |
 | T7 | No packet of a unit leaves before the unit's media time | video latency VL = first packet − RTP time (RP 2110-25 §4.8.5) ≥ 0, JT-NM Tested's "not in the future" | not guaranteed for wide senders with large pre-fill |
 
-Note 1: start time `st_tx_video_session.c:63-70`, cursor `:724-730`, RTP from the cursor `:793`; VRX0 per pacing `:566-579`, VRX_FULL = 9 from `:3365`. 619.1 µs ≈ 55.7 ticks is the RL point (VRX0 = 5); TRO alone (57.39 ticks) is not the offset.
+Note 1: start time `st_tx_video_session.c:63-70`, cursor `:741-747`, RTP from the cursor `:810`; VRX0 per pacing `:583-596`, VRX_FULL = 9 from `:3383`. 619.1 µs ≈ 55.7 ticks is the RL point (VRX0 = 5); TRO alone (57.39 ticks) is not the offset.
 
 Decisions behind them: D-09 (media time and launch separate, one RTP rule), D-39 (no source kinds: `min_tx_delay_ns` is the one knob; the launch delay is reported, not configured), D-10 (default video media time is the frame epoch), D-11 (exact rationals), D-24 (wire-visible engine changes are opt-in on the legacy API and on in the unified API). See [decisions.md](decisions.md).
 
@@ -179,7 +179,7 @@ engine's pacing never diverge (D-235).
   legacy clock and is not slewed. At a refresh it moves by at most age × |rate(legacy) −
   rate(MONOTONIC)|, ≤ 2.5 µs at 5 ms and 500 ppm, forward or backward, plus any step of the
   legacy clock itself (G-126).
-- **MS1 classification order**, the order of `dev/mt_dev.c:2280-2290`:
+- **MS1 classification order**, the order of `dev/mt_dev.c:2362-2372`:
   1. `MTL_FLAG_PTP_SOURCE_TSC`: the TSC row. It stays TSC even with `MTL_FLAG_PTP_ENABLE`,
      because the PTP client then skips the switch (`mt_ptp.c:1062-1063`).
   2. Else `ptp_get_time_fn`: `-MTL_ENOTSUP` (MS1).
@@ -240,7 +240,7 @@ writer; its fields and its wait-free reader are in [engine.md §3](engine.md#3-t
 | Ratio | least-squares servo over the last N (default 16) PHC/TSC cross-timestamps, each a PHC read bracketed by two TSC reads, rejected when the bracket is too wide. Today `impl->tsc_hz` is a one-shot calibration; 1 ppm is 1 µs per second |
 | Publication | **slewed, never stepped**: a new record starts on the previous line at the switch instant, with a ratio that meets the new estimate within one refresh period. The only steps are declared ones (`TIME_STEP`, §12) |
 | Per socket | TSC is not guaranteed synchronised across sockets; each record is built from cross-timestamps taken on that socket |
-| Two NICs | each leg's PHC offset is compensated into the one instance timescale; media time and every leg's launch use it. Today pacing reads port P for every leg (`st_tx_video_session.c:695`, `st_tx_audio_session.c:265-266`) |
+| Two NICs | each leg's PHC offset is compensated into the one instance timescale; media time and every leg's launch use it. Today pacing reads port P for every leg (`st_tx_video_session.c:712`, `st_tx_audio_session.c:265-266`) |
 
 The timing rules rely on two properties of the record: every tasklet on every socket computes the same TAI for the same instant, within the servo error; and a refresh never moves a scheduled launch backwards by more than the slew bound.
 
@@ -283,7 +283,7 @@ admin alarm runs every 6 s).
 - **Proof (`CLOCK_TAI`).** For any instant τ with `CLOCK_REALTIME` reading R(τ): before, R(τ) +
   U_utc·10⁹; after, R(τ) + k·10⁹; equal since k = U_utc. A tasklet reading the old source after the store
   gets the same value. TSC- and RL-paced frames read the clock once at their start
-  (`tv_sync_pacing`, `st_tx_video_session.c:692-698`); the PTP class reads it per burst (§12) and
+  (`tv_sync_pacing`, `st_tx_video_session.c:709-715`); the PTP class reads it per burst (§12) and
   gets equal values either side.
 - **The poll and the store.** k is read by `adjtimex()`, the source stored, and k read again. If a
   concurrent `ADJ_TAI` changed it in between, the switch coincided with a change of k under
@@ -462,7 +462,7 @@ ST 2110-10 §7.6.1 fixes the second field against the first: its RTP is the firs
 the frame period, truncated, `floor(TFRAME × 90000 / 2)`, whatever the first field's phase. The
 first field follows `floor(M × R)`. Where TFRAME × 90000 is an integer and the first field is on the
 grid, the second-field rule equals `floor(M(2m+1) × 90000)`, which is what MTL does today (each
-field from its own epoch, an even slot is the first field, `st_tx_video_session.c:706-711`). With T0
+field from its own epoch, an even slot is the first field, `st_tx_video_session.c:723-728`). With T0
 on the grid:
 
 | Format | First → second field | Why |
@@ -529,7 +529,7 @@ A TAI-mode `media_tai_ns` (after `media_time_offset_ns`, §4.5) is snapped to a 
 
 - Media indices per session strictly increase in submission order. INDEX mode: an equal index is `DROPPED/DUPLICATE_INDEX`, a smaller one `DROPPED/BEHIND`, both results (framework muxers whose `av_rescale_q` of a 29.97 stream repeats an index). `-MTL_EINVAL` is for malformed units only (and media fields below 0, R5).
 - A **forward gap** means no unit for those slots: under SKIP the receiver sees a regular-increment gap; the underrun policy fills it (§6.4).
-- `MTL_SUBMIT_DISCONTINUITY` marks an intended re-anchor and, **while RUNNING, may only jump forward**. Receivers drop a backwards RTP jump, and so does MTL's RX (`st_rx_video_session.c:1176-1197`; it accepts the old timestamp only after `ST_SESSION_REDUNDANT_ERROR_THRESHOLD` = 20 errors on every port, `st_header.h:81`). A backward
+- `MTL_SUBMIT_DISCONTINUITY` marks an intended re-anchor and, **while RUNNING, may only jump forward**. Receivers drop a backwards RTP jump, and so does MTL's RX (`st_rx_video_session.c:1203-1224`; it accepts the old timestamp only after `ST_SESSION_REDUNDANT_ERROR_THRESHOLD` = 20 errors on every port, `st_header.h:75`). A backward
   re-anchor needs stop and start.
 - **A restart on the wire.** A start after a stop keeps the session's SSRC (fixed at create:
   `sc.ssrc`, 0 = one random SSRC for the session; the granted value is `mtl_leg_info.ssrc`, the same
@@ -796,9 +796,9 @@ TSC, §6.1):
 | Essence | First packet | Per packet |
 |---|---|---|
 | video | `scheduled_first = TVD(N) − VRX0·TRS` | `TPRj` of the sender type (gapped N, linear NL and W); second field and PsF segment `+ TFRAME/2 + TLINE/2` |
-| cvideo (ST 2110-22) | `scheduled_first = TVD(N)`: the VRX model does not apply (ST 2110-22 §5.3 note 1), VRX0 = 0, as today (`st_tx_video_session.c:582-585`) | network compatibility model only; rate per `cvideo.rate_mode` |
+| cvideo (ST 2110-22) | `scheduled_first = TVD(N)`: the VRX model does not apply (ST 2110-22 §5.3 note 1), VRX0 = 0, as today (`st_tx_video_session.c:599-602`) | network compatibility model only; rate per `cvideo.rate_mode` |
 | audio | `launch(p) = M(first sample of p) + D_a` | `D_a` = `audio.launch_offset_ns`, default `clamp(profile's max early error + margin, 0, ptime/2)`, tens of µs on RL/TSN, so JT-NM's 1 ms holds; a positive `min_tx_delay_ns`: §5.2 on the sample grid, `M + D_a + L/Fs`; reported as TSDELAY. Today audio launches at the RTP instant, so an early wire error puts RTP "in the future" |
-| ANC | inside the ST 2110-40 window of frame `N = E⁻¹(M) + L_anc` (§9.2) | RTP packet j at `TFST + TEPO(j) + anc.target_delay_ns`, a deterministic target inside its window; today packets are spread over the whole frame (`st_tx_ancillary_session.c:1108`) |
+| ANC | inside the ST 2110-40 window of frame `N = E⁻¹(M) + L_anc` (§9.2) | RTP packet j at `TFST + TEPO(j) + anc.target_delay_ns`, a deterministic target inside its window; today packets are spread over the whole frame (`st_tx_ancillary_session.c:1193`) |
 | fastmeta | `M + D_fmd` (`fastmeta.target_delay_ns`): by default as audio's `D_a` (≤ 1 ms); with a positive `min_tx_delay_ns`, §5.2's rule on its grid; with a video in its start it follows L_v like ANC | ST 2110-41 §7 network compatibility model; keep-alive (§6.4) |
 | packet units | `MTL_PKT_PACE_UNIT` = the essence's model over each unit; `MTL_PKT_PACE_LAUNCH` = a chunk at `unit.launch_tai_ns`, then the session rate; `MTL_PKT_PACE_ASAP` = non-compliant | |
 
@@ -824,7 +824,7 @@ The codestream size rules (the per-unit ceiling, the box header, the oversize ch
   passes (§6.2). EXACT on video is task B3 of MS1 (a stretch), else MS2a.
 
 An invalid launch fails explicitly and **never falls back** to another pacing mode (G-26): below 0 is `-MTL_EINVAL`, `FIELD_REQUIRED` (R5); in the past or closer than the minimum lead is `LAUNCH_IN_PAST`, beyond the horizon `BEYOND_HORIZON`, with `-MTL_ERANGE` at submit when knowable then, else a result per the late policy. Today it
-silently falls back to default pacing (`st_tx_video_session.c:1796-1805`). An EXACT ST40 request outside the LLTM/CTM window is rejected.
+silently falls back to default pacing (`st_tx_video_session.c:1813-1822`). An EXACT ST40 request outside the LLTM/CTM window is rejected.
 
 ### 5.5 Pacing classes
 
@@ -935,7 +935,7 @@ Worked numbers, 1080p59.94 playback, N sender, 4320 packets, TRS 3.7074 µs:
 | `min_submit_lead_ns` | **−0.14 ms** | **≈ −0.58 to −0.60 ms** |
 | deadline | ≈ **M + 0.14 ms** | ≈ **M + 0.58 ms** |
 
-VRX0 per pacing way is today's (`st_tx_video_session.c:566-579`). A just-in-time producer that hands
+VRX0 per pacing way is today's (`st_tx_video_session.c:583-596`). A just-in-time producer that hands
 frame k over *at* M(k) (a GStreamer sink with `sync=TRUE`, `ffmpeg -re`) is on time under INDEX or
 TAI, but with 0.14 ms to spare on RL, less than one scheduling hiccup of the producer. The answer
 is a latency of at least `M_sink` = `latency_min_ns` + margin + TFRAME, carried in ct (§10.5); it is not
@@ -1003,7 +1003,7 @@ The grid (`struct st_core_grid`) per essence:
 - **The media mode sets the default**: AUTO → DEFER, INDEX/TAI → DROP. A session with a positive `min_tx_delay_ns` also raises `TIMING_INFEASIBLE` on its first late unit (§5.2).
 - DEFER is valid only when the app did not assign a media time: INDEX/TAI sessions reject it with `-MTL_EINVAL`. It is today's default without user timing (jump to the current epoch, `stat_epoch_drop`).
 - `indices_skipped_before` is only in `mtl_tx_result_full` (`mtl_tx_reap_full`); the core `mtl_tx_result` says only `MTL_TXR_DEFERRED`. Without results, or with core records only, `tx.indices_empty` and `tx.units_dropped{reason=too_late}` still count.
-- There is no unbounded "send as soon as possible". A 1080p59.94 frame occupies ≈ 16 ms of wire time, so a frame 1 ms late overlaps the next index's wire period and every later unit becomes late (the slide T5 forbids); MTL's own RX would drop it anyway (`st_rx_video_session.c:1176-1192`).
+- There is no unbounded "send as soon as possible". A 1080p59.94 frame occupies ≈ 16 ms of wire time, so a frame 1 ms late overlaps the next index's wire period and every later unit becomes late (the slide T5 forbids); MTL's own RX would drop it anyway (`st_rx_video_session.c:1203-1219`).
 - Bounded send-late (`MTL_LATE_SEND_LATE`: sent at TRS from its actual start only if it ends before the next occupied slot and within `tx.late_tolerance_ns`, else `DROPPED/WOULD_OVERLAP`; status `MTL_TX_LATE`) is Phase 7, the default of `MTL_MEDIA_SENDER`, and declared only under `MTL_LATER`.
 - **A late packet is non-compliant wherever it can occur.** A video packet that leaves after its
   read time TPRj underflows the virtual receiver buffer (ST 2110-21 §6.6.2; RP 2110-25 §4.9.2 counts
@@ -1022,7 +1022,7 @@ The grid (`struct st_core_grid`) per essence:
 | `MTL_UNDERRUN_SILENCE` | zero payload with regular RTP | audio option |
 | `MTL_UNDERRUN_REPEAT` | for index E, the pin of E's parity (index N; no pin: nothing) at E's launch, with M(E), RTP `rtp(N) + RTP(E) − RTP(N)` (RTP(i) = floor((M(i) + `tx.rtp_trim_ns`) × R): E's own RTP) and F bit `E & 1`; no user meta; decided at its pick-up deadline and sent if picked by the deadline + `sched_ns`; RUNNING only (D-239) | video option (MS4a1), cvideo JPEG XS option (MS4b) |
 
-Today MTL sends nothing when the app has no ANC frame (`st_tx_ancillary_session.c:942-946`), which breaks the keep-alive rule; an empty ANC frame from the app does send one packet (`:966`). `MTL_EVENT_TX_UNDERRUN` reports indices filled by the policy (`tx.indices_filled`, a subset of `tx.indices_empty`, [contract.md](contract.md) §11.3).
+Today MTL sends nothing when the app has no ANC frame (`st_tx_ancillary_session.c:1023-1027`), which breaks the keep-alive rule; an empty ANC frame from the app does send one packet (`:1052`). `MTL_EVENT_TX_UNDERRUN` reports indices filled by the policy (`tx.indices_filled`, a subset of `tx.indices_empty`, [contract.md](contract.md) §11.3).
 
 **The policy fills every index without a unit**, wherever the gap came from: no submission, a
 `TOO_LATE` drop, a not-sendable drop (`WAITING_NEIGHBOUR`, `LINK_DOWN`, `LEG_DISABLED`), an AUTO deferral, a forward gap in INDEX or TAI, a forward
@@ -1090,7 +1090,7 @@ its TPRj); `indices_skipped_before`; and the audio counts `samples_padded`, `sam
 Row submission is readiness inside one timed unit, chosen at create (`sc.unit = MTL_UNIT_ROWS`):
 submit the lease with `used` = rows ready, then submit the same lease again with a larger `used`. It
 maps onto today's ST20 slice mode (`query_frame_lines_ready` on TX, `notify_slice_ready` on RX,
-`st_tx_video_session.c:2005-2033`), a session type `st20p` does not offer; the video binding
+`st_tx_video_session.c:2022-2050`), a session type `st20p` does not offer; the video binding
 implements it in MS2 (D-101).
 
 - **`used` counts rows**, and 0 is legal: the first submit may claim the slot before row 0 exists.
@@ -1652,7 +1652,7 @@ unit. Every packet the switch drops counts in `rx.pkts_rejected{cause=flow_switc
   ticks, or when every enabled leg is stale. The next complete unit is delivered with
   `MTL_UNITF_DISCONTINUITY` and `MTL_UNITF_RELOCKED`, and `media_index` may go backwards
   (`rx.discontinuities`
-  counts). This replaces today's packet-count rule: 20 packets of every leg on an already delivered frame (`ST_SESSION_REDUNDANT_ERROR_THRESHOLD`, `st_header.h:81`, `st_rx_video_session.c:1187-1197`), reset by any other packet of the leg, blind to the skew, and never met by a backward RTP step (SF-71; [engine.md](engine.md) §2.14).
+  counts). This replaces today's packet-count rule: 20 packets of every leg on an already delivered frame (`ST_SESSION_REDUNDANT_ERROR_THRESHOLD`, `st_header.h:75`, `st_rx_video_session.c:1214-1224`), reset by any other packet of the leg, blind to the skew, and never met by a backward RTP step (SF-71; [engine.md](engine.md) §2.14).
 - **A running FLOWS update** (MS3, D-236). When every enabled leg's flow changes, the slots are
   reset at the switch (§11.4), when they hold no old-flow unit. The first unit delivered from the
   new flow carries `MTL_UNITF_DISCONTINUITY` whatever its RTP, and `MTL_UNITF_RELOCKED` when its
@@ -1680,7 +1680,7 @@ A monitor receives the 59.94p video, 48 kHz audio and ANC of one programme: all 
 
 ### 11.7 Due time, completion and 2022-7 skew
 
-Today a unit completes only when full (`st_rx_video_session.c:1855`) or when a newer timestamp evicts its slot (`rv_slot_by_tmstamp`, `:1214-1221`). The unified RX adds a due time, checked every iteration by the `tick` hook of the RX tasklet handler (MS2, D-103):
+Today a unit completes only when full (`st_rx_video_session.c:1959`) or when a newer timestamp evicts its slot (`rv_slot_by_tmstamp`, `:1241-1248`). The unified RX adds a due time, checked every iteration by the `tick` hook of the RX tasklet handler (MS2, D-103):
 
 | Term | Formula or default | Note |
 |---|---|---|
@@ -1730,10 +1730,10 @@ Today a unit completes only when full (`st_rx_video_session.c:1855`) or when a n
 On the unit: `rtp`, `media_index`, `media_tai_ns`, flags. `mtl_rx_get_detail(s, lease, &d, size)` (DP) for a held unit:
 
 - `arrival_first_tai_ns[leg]`, `arrival_last_tai_ns[leg]` per 2022-7 leg (`MTL_TIME_NONE` on a leg that received nothing): `MTL_RXF_HW_ARRIVAL` with `MTL_INSTANCE_HW_TIMESTAMP` on a port whose PMD has the RX timestamp
-  offload (`mt_dev.c:2422-2440`), else processing time (today taken on port P whatever the RX port,
+  offload (`mt_dev.c:2504-2522`), else processing time (today taken on port P whatever the RX port,
   `mt_ptp.c:1635-1641`). Processing time is one TSC read per RX burst, stored per slot and leg and
   converted to TAI once, when the unit completes, with the one clock read per unit the engine makes
-  today (`st_rx_video_session.c:1293-1294`): no clock read per packet;
+  today (`st_rx_video_session.c:1328-1329`): no clock read per packet;
 - `presentation_tai_ns` (media + link offset), `delivered_tai_ns` (when the unit became ready), `media_phase_ticks`, `units_missing_before`; completeness: `pkts_expected`, `pkts_received[leg]`, `pkts_recovered`, `missing_ranges`.
 
 Latency = `arrival_first − media` (sender offset plus network; JT-NM expects [0, 1 ms] for playback video); it is not stored. With `rx.timing_parser`, the detail's `timing[leg]` (`mtl_rx_get_detail`; `compliance` 0 when a leg has none) holds the ST 2110-21 measures per leg (compliance narrow/wide, CINST, VRX, FPT, latency, RTP
@@ -1747,7 +1747,7 @@ offset and delta; audio DPVR, IPT, TSDF).
 - `rtp_offset_ticks` is RTPOFFSET (RP 2110-25 §4.8.4), `latency_ns` the video latency VL = TPA0 − RTP time (RP 2110-25 §4.8.5), `margin_ns` = TROFFSET − FPT (RP 2110-25 §4.8.6), `gap_ns` this unit's first packet minus the previous unit's last (RP 2110-25 §4.8.7; negative = reordering).
 - `vrx_underflow` counts reads that found the buffer empty and `vrx_missing` packets absent at their read time (VRX_UNDERFLOW, VRX_PACKET_MISSING, RP 2110-25 §4.9.2), besides `vrx_min`, `vrx_max`, `vrx_avg_x100` and the CINST values.
 
-Without NIC RX timestamps (a VF, or a PMD without the offload) the parser runs on processing time, as today: packets inside an RX burst cannot be timed at arrival and are skipped and counted in `tp.untrusted_pkts` (`st_rx_video_session.c:1546-1557`); the unit's `mtl_rx_detail` then lacks `MTL_RXF_HW_ARRIVAL`, which says the measures are estimates. The twins that use the parser
+Without NIC RX timestamps (a VF, or a PMD without the offload) the parser runs on processing time, as today: packets inside an RX burst cannot be timed at arrival and are skipped and counted in `tp.untrusted_pkts` (`st_rx_video_session.c:1607-1618`); the unit's `mtl_rx_detail` then lacks `MTL_RXF_HW_ARRIVAL`, which says the measures are estimates. The twins that use the parser
 (`st20p_test.cpp`, `noctx/testcases/st20p_ptp_epoch_recovery_tests.cpp`) run on VFs, so a NIC-only parser would report nothing there; processing time therefore stays (D-98).
 
 The parser's known deviations (gapped TRS for W and NL, per-frame CINST reset, TROFF ignored, double-precision TAI, as EBU LIST) are listed in [standards.md](standards.md).
@@ -1813,7 +1813,7 @@ receiver's `media_index` never shifts against the sender's, and separate process
 | Unit at the step | Forward step (now jumps ahead by Δ) | Backward step (now jumps back by Δ) |
 |---|---|---|
 | queued, not picked up | keeps index, media time and RTP; at pick-up the late policy applies if its pick-up deadline is now past (DROP: `DROPPED/TOO_LATE`, `margin_ns` < 0), else ON_TIME | keeps them; waits for its launch, now Δ later |
-| picked up, TSC or RL pacing | finishes on the schedule it started with (one clock read at its start, `st_tx_video_session.c:692-698`); `max_packet_lateness_ns` reports lateness | finishes as started |
+| picked up, TSC or RL pacing | finishes on the schedule it started with (one clock read at its start, `st_tx_video_session.c:709-715`); `max_packet_lateness_ns` reports lateness | finishes as started |
 | picked up, PTP pacing (`MTL_PACING_PTP`) | the class compares the clock with each burst's target (`st_video_transmitter.c:573`, `:628`): the rest of the unit bursts at once | Δ ≤ 1 s: the rest waits Δ; Δ > 1 s: the target check fails (logged, `:581`, `:645`) and the rest is sent at once |
 | ARMED, T0 ahead | T0 stays; if the step passes T0 the session runs at once and units before now meet the late policy | waits Δ longer for T0 |
 | submitted after the step | INDEX: as queued. TAI: snapped from the producer's time on the stepped clock; the hysteresis (§4.3) no longer holds the expected index, so the unit snaps to the nearest and the skipped slots follow the underrun policy | INDEX: as queued. TAI: an index at or before the last sent is `DROPPED/BEHIND` until the clock passes it again |
@@ -1925,7 +1925,7 @@ A legacy application gets exact, programme-aligned RTP by moving its sessions to
 `floor` RTP, the RX inverse) lives in the engines and the core; no legacy helper exposes it. On the
 legacy API, E2's opt-in flag changes only the rounding to `floor` (G-106); USER_TIMESTAMP and
 USER_PACING keep their meaning, and the anchor arithmetic stays the application's (RxTxApp does it
-in `double`, `tests/tools/RxTxApp/src/rxtx_app.c:673-703`).
+in `double`, `tests/tools/RxTxApp/src/rxtx_app.c:645-675`).
 
 ## 15. Engine changes that carry these rules
 

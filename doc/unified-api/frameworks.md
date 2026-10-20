@@ -54,7 +54,7 @@ every frame. Normative rules: [timing.md](timing.md).
 |---|---|
 | a global instance; every context repeats identical device options (`mtl_dev_params_compatible()` compares the whole `mtl_init_params`) | `MTL_INSTANCE_SHARED` (§3), with one legacy instance from MS3 to MS6 (below) |
 | a NULL frame → `AVERROR(EIO)`, which ends the run | `-MTL_EAGAIN` → `AVERROR(EAGAIN)`, `-MTL_ESHUTDOWN` → `AVERROR_EOF`, `-MTL_EIO` → error |
-| copies both ways (five `/* todo: zero copy */` comments): RX | RX zero copy: `mtl_rx_dequeue()` and `av_buffer_create(addr, unit_bytes, free_cb, opaque, 0)`, with the lease's id as `opaque` (`mtl_rx_release` with a null session, D-226) and a copy of the units dequeue flags (§9) |
+| copies both ways (five `/* todo: zero copy */` comments): RX | RX zero copy: `mtl_rx_dequeue()` and `av_buffer_create(addr, unit_bytes, free_cb, opaque, 0)`, with the lease's ID as `opaque` (`mtl_rx_release` with a null session, D-226) and a copy of the units dequeue flags (§9) |
 | copies both ways: TX | TX video: `mtl_tx_acquire()` and a submit with `MTL_SUBMIT_SRC_PLANES` naming the `AVFrame` planes (one copy, or the conversion, in the call), until per-frame layouts (`mtl_tx_acquire_layout()`) send from them directly; TX audio: `mtl_tx_write()`; on a converting session set `MTL_SESSION_TX_SRC_PLANES` |
 | `read_header` sets neither `avg_frame_rate` nor `r_frame_rate`; `fb_cnt` 3, at most 8 | set both rates; `fb_cnt` default 5 (at most `info.max_count`: 8 until E11 in MS2); wrap each unit, and copy the ones dequeue flags into an `av_buffer_pool` (§9): a pool of 5 keeps lending, the library's default of 3 copies every unit |
 | RX `pts` = a frame counter; TX ignores `pts` | RX `pts` from `u.media_tai_ns`; TX the PTS rescaled against `start_time_realtime`, TAI media mode |
@@ -75,14 +75,14 @@ calls `mtl_uninit` after every reference has closed. MS6 replaces both with
 ### 2.3 OBS (`ecosystem/obs_mtl/`)
 
 Input (st20p RX through a callback and condition variable with a stray unlock,
-`linux-mtl/mtl-input.c:86-125`; a per-source `mtl_init`, `:317-338`): `mtl_rx_dequeue(timeout)` on
+`linux-mtl/mtl-input.c:86-125`; a per-source `mtl_init`, `:316-337`): `mtl_rx_dequeue(timeout)` on
 the source thread, `mtl_time_convert(…, MTL_CLOCK_TAI, MTL_CLOCK_MONOTONIC, …)` for the OBS
 timestamp, `MTL_INSTANCE_SHARED` across sources. Output (never finished, `#if TODO_OUTPUT`): the
 live-sink recipe (§4). The draft's `tfmt = ST10_TIMESTAMP_FMT_MEDIA_CLK` with an OBS monotonic
 timestamp (`linux-mtl/mtl-output.c:224-225`) is latent, not wrong on the wire: the output sets
 neither USER_PACING nor USER_TIMESTAMP (`mtl-output.c:154-168`), so st20p discards the timestamp
-(`st20_pipeline_tx.c:231-234`) and sends as AUTO. The port converts MONOTONIC → TAI. Per-source
-`lcores` and queue counts: `mtl-input.c:330-332`, `mtl-output.c:139-141` (§3).
+(`st20_pipeline_tx.c:233-236`) and sends as AUTO. The port converts MONOTONIC → TAI. Per-source
+`lcores` and queue counts: `mtl-input.c:329-331`, `mtl-output.c:139-141` (§3).
 
 ## 3. Sharing one instance between plugins
 
@@ -105,7 +105,7 @@ zero is not a request, so it never conflicts.
 Two in-tree consumers break this rule today, and a literal port fails:
 
 - **OBS** opens one instance per source with that source's `lcores` and its own queue counts
-  (input: TX 0, RX 1; output: TX 1, RX 0; `ecosystem/obs_mtl/linux-mtl/mtl-input.c:330-332`,
+  (input: TX 0, RX 1; output: TX 1, RX 0; `ecosystem/obs_mtl/linux-mtl/mtl-input.c:329-331`,
   `mtl-output.c:139-141`). Mapped to `ip.lcores` and `ports[i].tx_queues` / `.rx_queues`, the
   second MTL source of a scene with another CPU list fails open with `INSTANCE_MISMATCH`, and so
   can an output next to an input.
@@ -324,7 +324,7 @@ copy-only essences.
 | an application that wants MTL-placed memory shared by several sessions (Rivermax "one registration for many streams") | 0: `mtl_mem_alloc()` once, attach every session over the region | MS2 |
 | a GStreamer upstream pool that ignores `propose_allocation` (most decoders, `videotestsrc`) | 1: a submit with `MTL_SUBMIT_SRC_PLANES` copies (or converts) the buffer into the slot during the call; 0 once it can be imported (page-aligned host memory within the region budget; MS2); on a converting session set `MTL_SESSION_TX_SRC_PLANES` | MS1 |
 | FFmpeg decoder frames (`av_buffer_pool`, 64 B aligned) | 1, through `MTL_SUBMIT_SRC_PLANES`; 0 only with an application `get_buffer2` that carves frames from one imported page-aligned arena (MS2) | MS1 |
-| FFmpeg TX `AVPacket`s for ST 2110-22 | packet build only: the codestream is always copied into packets (ST22 forces `tx_no_chain`, `st_tx_video_session.c:3413-3416`); `mtl_tx_write()` or a library slot | MS4 |
+| FFmpeg TX `AVPacket`s for ST 2110-22 | packet build only: the codestream is always copied into packets (ST22 forces `tx_no_chain`, `st_tx_video_session.c:3431-3434`); `mtl_tx_write()` or a library slot | MS4 |
 | audio, ANC, fastmeta, any producer | packet build only; `mtl_tx_write()` needs no slot | MS4 |
 | MXL grains, fixed grain count | 0: attached pool, `MTL_SESSION_RX_BY_INDEX` | MS2b |
 | MXL flow re-created with another grain count | 0: stop, `mtl_session_update()` with `MTL_UPDATE_POOL`, detach, attach, start (one stop/start gap); or a per-acquire layout, which needs no re-attach | MS5 (update); MS2 (layout) |
@@ -376,7 +376,7 @@ The recipe for every framework source (D-228). MTL owns the pool; the framework 
   - `buf = gst_buffer_new_wrapped_full(0, u.plane[0].addr, unit_bytes + MTL_RX_TAIL_BYTES, 0,
     unit_bytes, (gpointer)(uintptr_t)u.lease.id, notify)`; `notify(p)` calls
     `mtl_rx_release(MTL_NULL(mtl_session_h), (mtl_lease_h){(uint64_t)(uintptr_t)p})`: the lease
-    names its session (D-226), so nothing is allocated per frame. The cast keeps the 64-bit id on a
+    names its session (D-226), so nothing is allocated per frame. The cast keeps the 64-bit ID on a
     64-bit host only. On a 32-bit host the pointer names entry `u.slot` of a table of `pool_count`
     leases, written at dequeue (the slot is not dequeued again before its release). The table
     belongs to the session, not to the element: allocate it with the session and free it only

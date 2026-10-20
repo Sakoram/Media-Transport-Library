@@ -230,7 +230,7 @@ A verb that several objects have is one exported function over `struct mtl_objec
 | `mtl_read_events(o, ev, ev_size, max, timeout)` (WT) | session, instance | `mtl_session_read_events`, `mtl_instance_read_events` |
 
 - `mtl_release(s, lease)` (DP) is not an object verb: it takes a session, which may be null, and a lease, and is the one export behind `mtl_tx_release` and `mtl_rx_release` (§5.4).
-- A kind without the verb is `-MTL_EINVAL`. The rules of a verb for one kind are stated at its wrapper and in the section of that object; this file names the wrappers.
+- A kind without the verb is `-MTL_EINVAL`. The rules of a verb for one kind are stated at its wrapper and in the section of that object; this file lists the wrappers.
 - The record wrappers take a typed pointer and pass `sizeof(*r)`; the exported `mtl_reap` and `mtl_read_events` keep `rec_size`, so a larger record version is filled further.
 - `timeout_ns` of `mtl_close` bounds the instance and session closes only; the other kinds never wait.
 - Created timelines (`mtl_timeline_h`) are reserved for later (`MTL_LATER`); they are not objects of these verbs in v1.
@@ -504,7 +504,7 @@ legacy instance's devices or legacy sessions; `mtl_uninit()` does that. Details:
 - **Teardown order:** close the wrapper (`mtl_instance_close`) first, then `mtl_uninit()`.
 - While a reference to a wrapper of the instance has not retired (its close has not returned 0) `mtl_uninit()`
   returns `-EBUSY` and stops nothing; the two calls exclude each other. Today `mtl_uninit` with live sessions self-deadlocks (SP-01, [engine.md](engine.md)); the legacy teardown order is fixed as a bugfix.
-- **Before the legacy `mtl_start()`.** On a bridged instance, create works at any time; a start before the legacy `mtl_start()` is `-MTL_EBUSY` (`WRONG_STATE`), because no tasklet runs until it (`dev/mt_dev.c:2113-2125`). RxTxApp and KahawaiTest start the legacy instance first (or set `MTL_FLAG_DEV_AUTO_START_STOP`).
+- **Before the legacy `mtl_start()`.** On a bridged instance, create works at any time; a start before the legacy `mtl_start()` is `-MTL_EBUSY` (`WRONG_STATE`), because no tasklet runs until it (`dev/mt_dev.c:2195-2207`). RxTxApp and KahawaiTest start the legacy instance first (or set `MTL_FLAG_DEV_AUTO_START_STOP`).
 - **Time.** A wrapper's clock, in MS1 and from MS2a, with its flags and states per legacy clock: [timing.md §2.2, The legacy bridge clock](timing.md#the-legacy-bridge-clock).
 
 - **Options** on a wrapper: [migration.md](migration.md) §6.2.
@@ -648,7 +648,7 @@ mode is [timing.md](timing.md) §5.3):
 | `MTL_CVIDEO_VBR_MAX` | as CBR |
 
 An oversize codestream fails **synchronously at submit** with `-MTL_ENOSPC`, reason `CODESTREAM_OVERSIZE`, when `used > granted − box_hdr_bytes`. Today the check is at build time and reported only through `notify_frame_done`
-(`st_tx_video_session.c:2467-2475`). The box header is the jpvs/jpvi box MTL prepends; today `frame_size = codestream_size + st22_box_hdr_length` (`st_tx_video_session.c:2481`). The FFmpeg
+(`st_tx_video_session.c:2484-2492`). The box header is the jpvs/jpvi box MTL prepends; today `frame_size = codestream_size + st22_box_hdr_length` (`st_tx_video_session.c:2498`). The FFmpeg
 muxer takes `frame_size` from its `bpp` option (`ecosystem/ffmpeg_plugin/mtl_st22p_tx.c:98`), so with `codestream_bytes = frame_size` its acceptance rule (`pkt->size ≤ frame_size`, `:266-286`) is unchanged under CBR and only the wire gains padding. An encoder that is not byte-exact is handled by the ceiling and the padding, not by VBR (ST 2110-22 §4, §5.2).
 
 ### 3.4 Raster and frame rate
@@ -1579,7 +1579,7 @@ range against plane 1 before reading a word. The checks:
 | Applies to | Check |
 |---|---|
 | every mode | `used` ≤ `max_packets` |
-| every mode | each entry's `udw_count` ≤ 255 by its type (ST 291-1 §6.5; today's `st40_rfc8331_encode_packet` already rejects more, `include/st40_api.h:901`) |
+| every mode | each entry's `udw_count` ≤ 255 by its type (ST 291-1 §6.5; today's `st40_rfc8331_encode_packet` already rejects more, `include/st40_api.h:979`) |
 | every mode | the entries' `udw_count` summed ≤ `max_udw_words` |
 | every mode | `flags` ≤ 7Fh (RX-only flags ignored), `reserved` 0, `stream` ≤ 127, `line` ≤ 7FFh, `hoffset` ≤ FFFh |
 | every mode | the word range within plane 1 |
@@ -1597,7 +1597,7 @@ MTL does not check the DID registry, DBN continuity, the order within a line, or
 "should not" for embedded audio and EDH. A second unit for an index is `DROPPED`
 (`DUPLICATE_INDEX`).
 
-Today the TX meta array is capped at `ST40_MAX_META` = 20 (`include/st40_api.h:308`, E12); the
+Today the TX meta array is capped at `ST40_MAX_META` = 20 (`include/st40_api.h:381`, E12); the
 legacy TX frame path drops ANC packets beyond its estimated RTP count (SF-87), and an entry with
 more than 255 user data words fails the legacy encoder after the frame's earlier RTP packets left
 (SF-88).
@@ -2345,9 +2345,9 @@ device memory in MS6.
 - `MTL_MEM_READ` and `MTL_MEM_WRITE` are checked at attach (`ACCESS_MISMATCH`). They are a contract check, not IOMMU protection: the device mapping is read-write in the first implementation.
 - **PA mode** (`caps.iova_mode`; accepted only with `instance.allow_noiommu`): imported memory other
   than EAL hugepages is copy only (today `mtl_dma_map` refuses PA mode, `mt_main.c:840`, `:901`);
-  library pools copy every packet that crosses a page (`st_tx_video_session.c:2923`), counted in
+  library pools copy every packet that crosses a page (`st_tx_video_session.c:2941`), counted in
   `tx.pkts_copied_partial`; the DMA engines are not available (`mtl_udma_create` refuses PA mode,
-  `mt_main.c:1146`).
+  `mt_main.c:1144`).
 - An import beyond the region budget is `-MTL_ENOSPC`, `REGION_BUDGET`, never an opaque DPDK error (G-102). Import one region per pool arena, not one per buffer. Memlock and the VFIO mapping limit are checked per import.
 - Mapping and unmapping are CP steps, never on the data path of a running session (G-36).
 - `mtl_mem_close(r)` (CP; `mtl_close` on the region) drops the caller's reference. 0: retired, the application may unmap the memory. 1: still referenced; calling it again polls, and `MTL_EVENT_REGION_RELEASED` on the instance reports the end. A null handle returns 0. A region still referenced makes close return 1, never `-MTL_EBUSY` (G-11).
@@ -2536,7 +2536,7 @@ sequenceDiagram
 - The fill reads a copy of the unit's packet bitmap that the RX binding takes into the slot
   table when an incomplete unit of a library pool with the fill on completes (≈ 540 B at 1080p,
   8.6 KB at 4320p, room preallocated per slot at create), because today's engine clears the
-  reassembly slot's bitmap at reuse (`st_rx_video_session.c:1298-1299`, [engine.md](engine.md)
+  reassembly slot's bitmap at reuse (`st_rx_video_session.c:1333-1334`, [engine.md](engine.md)
   §2.11). A complete unit, an attached pool and `MTL_SESSION_RX_NO_FILL` copy nothing, so the
   tasklet pays only on loss. It lands in MS2a; until then a library-pool unit with lost packets is delivered `MTL_RX_INCOMPLETE` without the fill.
 
@@ -2557,7 +2557,7 @@ sequenceDiagram
 
 | Kind | Payload |
 |---|---|
-| `MTL_META_USER` | user meta bytes; `tag` 0 = untagged. Video and cvideo only, at most 1332 B, one packet: `pkt_udp_suggest_max_size` − `sizeof(st20_rfc4175_rtp_hdr)` = 1352 − 20 (`st_tx_video_session.c:271-272`); the other essences report a capacity of 0 for it |
+| `MTL_META_USER` | user meta bytes; `tag` 0 = untagged. Video and cvideo only, at most 1332 B, one packet: `pkt_udp_suggest_max_size` − `sizeof(st20_rfc4175_rtp_hdr)` = 1352 − 20 (`st_tx_video_session.c:288-289`); the other essences report a capacity of 0 for it |
 | `MTL_META_RTCP_MIB` | TX: Media Info Blocks for this unit's sender report only (Phase 7, `MTL_LATER`) |
 
 TX: the meta area is validated and copied at submit, so later writes never reach the wire.
@@ -2621,7 +2621,7 @@ GPU pinned host memory imports as host memory today.
    - A unit dropped before delivery (`rx.incomplete = MTL_RX_DISCARD`, a relock, an eviction)
      gives its destination back, to be taken first.
    - Delivery is in reception order (D-126), not provide order: the engine assembles up to two
-     units and evicts the oldest at a third timestamp (`st_rx_video_session.c:1213-1221`).
+     units and evicts the oldest at a third timestamp (`st_rx_video_session.c:1240-1248`).
    - `u.cookie` is the destination's cookie and the only identity; `u.slot` is `UINT32_MAX`.
 5. *None held.* The unit is not received: it is counted in `rx.units_missed_pool_full` and the
    next unit's `missed_before`, and never placed in library memory (no mixed pool). With
@@ -3273,7 +3273,7 @@ sequence the library writes nothing inside the payload.
 
 | Essence | Rule in packet mode |
 |---|---|
-| video | field parity comes from the unit's media index, not the application's F bit (VALIDATE checks the F bit): today's RTP applications that never set the F bit send interlace at half rate (`doc/design.md:501`, `st_tx_video_session.c:1399-1404`) |
+| video | field parity comes from the unit's media index, not the application's F bit (VALIDATE checks the F bit): today's RTP applications that never set the F bit send interlace at half rate (`doc/design.md:501`, `st_tx_video_session.c:1416-1421`) |
 | cvideo | the RFC 9134 header fields are the application's; CBR needs exactly `packets_per_unit` packets per unit (`MTL_SUBMIT_UNIT_END` with fewer is `-MTL_EINVAL`); `MTL_CVIDEO_VBR_MAX` allows fewer; a rate-limiter class is downgraded to software as today, and reported |
 | audio | the pacing unit is one packet; a chunk is consecutive packets, its media time the first sample of the first packet, each later packet first sample + the packet's samples; a chunk off the packet grid is a DISCONTINUITY (D-41); `MTL_SUBMIT_UNIT_END` is ignored |
 | ANC | packets go out in the ST 2110-40 window, after the pacing sync (fixes [engine.md](engine.md) §7.4 #4); bytes are in wire order in both directions, the library swaps nothing (fixes #5) |

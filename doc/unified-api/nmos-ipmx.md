@@ -727,7 +727,7 @@ with care [verified in `lib/`; effort I]:
 |---|---|---|
 | connect, change | `st20p_tx_update_destination`, `st20p_rx_update_source` (every essence has a pair) change IP and port per leg | use them; they switch mid-frame, not at a boundary, and cannot be scheduled |
 | unicast sender | an on-subnet destination is resolved by ARP under the session lock, up to `arp_timeout_s` (60 s by default); an off-subnet one (the AMWA suite's 192.0.2.1) ARPs the gateway, or fails at once without one (`mt_main.c:38-56`) | declare Senders `rtp.mcast`, as IPMX does (TR-10-8 §7), and record the suite's unicast tests as expected failures |
-| the clock | the default time source is `CLOCK_REALTIME`, UTC, 37 s off TAI (`dev/mt_dev.c:2280-2290`) | set `ptp_get_time_fn` to read `CLOCK_TAI`, as RxTxApp does (`rxtx_app.c:150-168`), with ptp4l and phc2sys |
+| the clock | the default time source is `CLOCK_REALTIME`, UTC, 37 s off TAI (`dev/mt_dev.c:2362-2372`) | set `ptp_get_time_fn` to read `CLOCK_TAI`, as RxTxApp does (`rxtx_app.c:148-166`), with ptp4l and phc2sys |
 | `master_enable` | no mute and no per-session stop | TX: stop handing frames over (nothing is sent); RX: free the session; one leg: send it to an unused group |
 | exist before a connection | an RX session cannot have a zero address | create the Receiver at its first activation |
 | SDP | none in MTL | nmos-cpp builds and parses it |
@@ -1222,7 +1222,7 @@ Without the Phase 7 extras a Node still works:
     into b's slots. Then close a.
   - With equal rates and delays the sessions never share a wire slot and leave none empty. With a
     rate change the gap is under one of b's periods.
-  - b is a new flow: new flow id, SDP and IS-04 version, and its own SSRC unless the Node sets
+  - b is a new flow: new flow ID, SDP and IS-04 version, and its own SSRC unless the Node sets
     a's.
 - **RX format change**: with `video.detect` ON the session follows in-band (MS3). A new group is a
   FLOWS update. A new group with detection off takes the A/B swap below.
@@ -1502,7 +1502,7 @@ latest per leg, and maps each unit's RTP onto the sender's clock
   it. Library packetisation of H.264 and H.265 is later; until then the application uses packet
   units (GI-8).
 - **RTP header extensions and CSRCs on RX.** The RX parsers read fixed offsets and ignore X and CC
-  (SF-68 **[verified]**; TX writes X = CC = 0 at `st_tx_video_session.c:959-960`), so an HDCP or PEP stream is mis-parsed. The engine fix skips them before
+  (SF-68 **[verified]**; TX writes X = CC = 0 at `st_tx_video_session.c:976-977`), so an HDCP or PEP stream is mis-parsed. The engine fix skips them before
   the payload header; packet units keep `data` at the RTP header and flag `MTL_PKTE_HDR_EXT` (GI-9).
 - **IGMPv2.** `port.igmp_version` (2124, C): v3 by default, falling back to v2 after a v2 querier
   (RFC 3376). With V2, SSM is lost and `source_filter` is checked in software (GI-12).

@@ -110,12 +110,12 @@ Rules of the picture:
   once, in the core. The pipelines keep only what is theirs to keep (the `st_frame` view, the
   legacy flags), and become wrappers as soon as their essence is on the core, not at the end.
 - **Bindings use the callbacks the engines already make.** Every TX engine pulls through
-  `get_next_frame` (`st_tx_video_session.c:1922`, ST22 `:2444`, `st_tx_audio_session.c:765`,
-  `st_tx_ancillary_session.c:937`, `st_tx_fastmetadata_session.c:718`) and reports through
-  `notify_frame_done`; RX asks `query_ext_frame` (`st_rx_video_session.c:1273`) and reports
+  `get_next_frame` (`st_tx_video_session.c:1939`, ST22 `:2461`, `st_tx_audio_session.c:765`,
+  `st_tx_ancillary_session.c:1018`, `st_tx_fastmetadata_session.c:718`) and reports through
+  `notify_frame_done`; RX asks `query_ext_frame` (`st_rx_video_session.c:1300`) and reports
   `notify_frame_ready`, `notify_slice_ready` (`:1095`) and `notify_detected` (`:2803`). Today's
-  pipelines are one implementation of exactly these (`st20_pipeline_tx.c:456-457`,
-  `st30_pipeline_tx.c:294-295`, `st20_pipeline_rx.c:566`, `:595`) **[verified at HEAD]**. So
+  pipelines are one implementation of exactly these (`st20_pipeline_tx.c:464-465`,
+  `st30_pipeline_tx.c:304-305`, `st20_pipeline_rx.c:568`, `:595`) **[verified at HEAD]**. So
   frames and rows need no new engine entry point; packets need one shared chunk expander ([engine.md](engine.md) §6.2).
   ANC adds one create-time internal setter per direction in `st_engine_core.h` because
   `struct st40_frame` (20 entries) and `struct st40_rx_ops` are frozen ABI until F+2 (§1.1): TX
@@ -124,7 +124,7 @@ Rules of the picture:
   per-unit destination callback the ST40 RX engine lacks (the analogue of video's
   `query_ext_frame`) ([engine.md](engine.md) §2.11, D-149).
 - **Bindings are wait-free.** They run on the tasklet with the session spinlock held
-  (`st_tx_video_session.c:2682`, `st_rx_video_session.c:3516`) and complete a unit by the steps
+  (`st_tx_video_session.c:2699`, `st_rx_video_session.c:3644`) and complete a unit by the steps
   of §4.2, whose mark in the loop's bitmap (wait-protocol.md §4) comes only when a target is armed. No lock, no
   allocation, no syscall. They are wait-free, except the queue push of MS2a (step P2: a lock-free
   CAS whose retries are bounded by the pushes racing on one queue and two consumer transitions per
@@ -191,11 +191,11 @@ shell, `lib/src/unified/compat_log.c`, prints the lines of the legacy pipelines 
 `tests/acceptance` parses, in the pipelines' format, for each unified video session:
 
 - at create, `st20p_tx_create(<n>), transport fmt …, input fmt: …, flags 0x…` and the RX twin
-  (`st20_pipeline_tx.c:1175`, `st20_pipeline_rx.c:1104`; read by `RxTxApp.py:973-976` and
-  `rxtxapp.py:349`, `:401`), `<n>` the shell's own create count per direction, as
+  (`st20_pipeline_tx.c:1184`, `st20_pipeline_rx.c:1125`; read by `RxTxApp.py:919-922` and
+  `rxtxapp.py:347`, `:399`), `<n>` the shell's own create count per direction, as
   `st20p_tx_idx`;
 - at each stat dump, `TX_st20p(<n>), frame get try X succ Y, put Z, drop D`
-  (`st20_pipeline_tx.c:680`, parsed at `application_base.py:424-426`), as deltas since the
+  (`st20_pipeline_tx.c:688`, parsed at `application_base.py:424-426`), as deltas since the
   previous dump, which the shell keeps per session: X and Y the units leased (the core counts no
   failed acquire), Z the units submitted, D the units DROPPED, all from the core's cumulative
   counters ([engine.md](engine.md) §1.8).
@@ -314,18 +314,18 @@ and the engine work it needs.
 | Essence × direction | Callbacks the binding implements | Engine work it needs |
 |---|---|---|
 | video TX, frames | `get_next_frame` (the descriptor at the pick cursor if its slot word is QUEUED with its generation; N from `st_core_tx_pick`, §3.2; the meta; ENGINE), `notify_frame_done` (the completion CAS, the result) | MF1 (`st_tx_video_session.c:134-139`), MF7, the recovery verdict and idle descriptor cleanup ([engine.md](engine.md) §5, §2.3); "last packet handed" for no-chain (MS2) |
-| video TX, rows (MS2) | the same, with the session created `ST20_TYPE_SLICE_LEVEL`; `query_frame_lines_ready` returns `rows(progress)` only (an acquire load), or the TRUNCATE code that ends the frame early | the TRUNCATE return code and `sc.video.troffset_us` ([engine.md](engine.md) §2.13); the rest is today's slice path (`st_tx_video_session.c:2005-2033`) |
+| video TX, rows (MS2) | the same, with the session created `ST20_TYPE_SLICE_LEVEL`; `query_frame_lines_ready` returns `rows(progress)` only (an acquire load), or the TRUNCATE code that ends the frame early | the TRUNCATE return code and `sc.video.troffset_us` ([engine.md](engine.md) §2.13); the rest is today's slice path (`st_tx_video_session.c:2022-2050`) |
 | video RX, frames | `query_ext_frame` hands the engine a core slot (MS1: any FREE; MS2: attached pools or the oldest unread (`RX_LATEST`); MS2b: by index) and records the first arrival; `notify_frame_ready` publishes it with the next `pub_seq` | incomplete delivery always on; the RX hook never refuses (SF-45); MF4; a tasklet-callable frame put and the frame count ([engine.md](engine.md) §2.11) |
 | video RX, rows (MS2) | `notify_slice_ready`: an RMW of `progress` that runs EVENT only at a reader's `want` (RW1, wait-protocol.md §3) | none |
 | per-packet conversion | the engine's `uframe_pg_callback` path, installed by the video RX binding (library code, the one tasklet conversion contract.md §9.7 allows) | none |
-| cvideo TX/RX (MS4) | the ST22 `get_next_frame` (`st_tx_video_session.c:2444`) and RX callbacks; codecs on the transform state | per-unit status, stats, CBR (E10), SF-42 |
-| audio TX/RX (MS4) | `get_next_frame` (`st_tx_audio_session.c:765`), done, RX ready | "last packet handed" (done fires at build today, `:923-925`); media time from the sample index; carry buffer (E6) |
+| cvideo TX/RX (MS4) | the ST22 `get_next_frame` (`st_tx_video_session.c:2461`) and RX callbacks; codecs on the transform state | per-unit status, stats, CBR (E10), SF-42 |
+| audio TX/RX (MS4) | `get_next_frame` (`st_tx_audio_session.c:765`), done, RX ready | "last packet handed" (done fires at build today, `:922-924`); media time from the sample index; carry buffer (E6) |
 | ANC TX/RX (MS4a2) | see ANC below | E7, E12, UDW |
 | fastmeta TX/RX (MS4a1) | TX: `get_next_frame` (`st_tx_fastmetadata_session.c:718`), done. RX: `st41_rx_set_unit_sink` gives a core slot per new RTP timestamp, slot-RX (§2.2); today `st_rx_fastmetadata_session.c:183`, `:205` are RTP-only | keep-alive; the unit sink (E16) |
 | packet units, every essence (MS5) | one shared chunk expander on the TX tasklet (header mbufs plus extbuf attaches, one `shinfo` per chunk whose `free_cb` completes the chunk) feeding the engine's existing RTP ring; RX chunks made at dequeue from `rtps_ring` (ring-RX, §2.2) | PE1 as one helper (about 250 lines [inferred]) + about 10 lines per TX engine where it dequeues `packet_ring`; PE2–PE8 |
 | null | none: completes units at the launch instant `st_core_admit` gives with the null grid (§3.2) on the instance clock (synchronously under the test clock) and loops each TX unit to the RX sessions whose flow matches (§2.4) | none |
 
-**ANC.** TX: `get_next_frame` (`st_tx_ancillary_session.c:937`) takes the descriptor, decides the
+**ANC.** TX: `get_next_frame` (`st_tx_ancillary_session.c:1018`) takes the descriptor, decides the
 index and the late policy, fills `st40_tx_frame_meta` (TAI TFST, `second_field`, `rtp_timestamp`)
 and returns frame 0 or the carrier 1, O(1); the engine sends the slot's wire records set up by
 `st40_tx_set_unit_source` ([engine.md](engine.md) §2.11), 16 per call; `notify_frame_done` is the completion. RX:
@@ -722,7 +722,7 @@ and force-completes the unit (E8, MS2). Without it an RX unit completes only whe
 and DRAIN cannot deliver a partial unit. Arrival and due times live in the `mt_get_tsc` domain:
 the RX handler reads the TSC once per burst that returned packets, the due time is that first
 arrival + (unit period + flush offset) in the same units, and the `tick` compares it with the TSC
-sample the scheduler loop already takes once per iteration (`mt_sch.c:217`, stored in the
+sample the scheduler loop already takes once per iteration (`mt_sch.c:215`, stored in the
 scheduler); TAI comes in once per unit, at completion.
 
 ## 4. Results, completion and handles
@@ -838,7 +838,7 @@ The reader:
 - **Single producer per result.** The claim CAS makes exactly one context complete a unit, and only
   the winner writes the result, so a losing completer never touches the record. It also closes the
   double-completion window between `tv_frame_free_cb` and recovery (`st_tx_video_session.c:127-135`
-  vs `:4295-4300`, SF-39).
+  vs `:4314-4319`, SF-39).
 - **No queue on the tasklet side.** The result's entry was reserved at acquire (§4.4), so nothing
   the tasklet writes can overflow, and the core has no tasklet: the bindings run inside the engine's
   own callbacks (the builder enters `get_next_frame` only while it waits for a frame).
@@ -857,29 +857,29 @@ column is the block a completion writes ([engine.md](engine.md) §1.8).
 
 | Context | Where today | Wake path and stats block |
 |---|---|---|
-| PMD free callback inside `rte_eth_tx_burst` on the transmitter (chain mode) | `tv_frame_free_cb` `st_tx_video_session.c:116-143` via `sh_info` (`:235-237`, `:1295-1298`) | the scheduler's bitmap and block |
-| builder, no-chain ST20 and ST22 (done at end of build) | `:2130-2134`, `:2655-2659` | the scheduler's bitmap and block; moves to the "last packet handed" completion ([engine.md](engine.md) §2.2, MS2) |
-| TX recovery (on the transmitter until engine change R1 moves it to a worker in MS6): only the verdict and the software-held references ([engine.md](engine.md) §5); the PMD free callback still publishes | `:4293-4301` | tasklet: the scheduler's bitmap; worker: direct |
-| the transmitter state cleanup, which frees in-flight chain mbufs: at teardown and in recovery | `st_tx_video_transmitter_state_cleanup` `:3073` (per port `:3056`), called at `:3293` and `:4256` **[verified at HEAD]** | the calling context: direct |
+| PMD free callback inside `rte_eth_tx_burst` on the transmitter (chain mode) | `tv_frame_free_cb` `st_tx_video_session.c:116-143` via `sh_info` (`:252-254`, `:1312-1315`) | the scheduler's bitmap and block |
+| builder, no-chain ST20 and ST22 (done at end of build) | `:2147-2151`, `:2672-2676` | the scheduler's bitmap and block; moves to the "last packet handed" completion ([engine.md](engine.md) §2.2, MS2) |
+| TX recovery (on the transmitter until engine change R1 moves it to a worker in MS6): only the verdict and the software-held references ([engine.md](engine.md) §5); the PMD free callback still publishes | `:4312-4320` | tasklet: the scheduler's bitmap; worker: direct |
+| the transmitter state cleanup, which frees in-flight chain mbufs: at teardown and in recovery | `st_tx_video_transmitter_state_cleanup` `:3091` (per port `:3074`), called at `:3311` and `:4275` **[verified at HEAD]** | the calling context: direct |
 | another session's tasklet, on another scheduler, freeing the last mbuf in a shared TX queue | TSQ **[inferred]** | the bitmap and the stats block of that other scheduler |
 | the TSQ idle cleanup (E1b, D-213): a foreign scheduler's tasklet, by trylock of the queue's `tx_mutex` (by lock on the queue-fatal recovery path) | `mt_tsq_done_cleanup` (`datapath/mt_shared_queue.c:625-633`), which E1b rewrites | the bitmap and the stats block of that scheduler |
 | native AF_XDP TX copy: every segment is copied into UMEM and the original freed at once, so "transport done" there is the copy, before the wire | `dev/mt_af_xdp.c:555-597` **[verified at HEAD]** | the scheduler's bitmap and block |
 | queue stop/start after a stall, on a worker (new, [engine.md](engine.md) §4) | — | direct |
-| the application thread in `mtl_tx_submit` with in-caller conversion: it converts before the QUEUED store, so it completes a unit only when the conversion fails (today `put_frame`/`put_ext_frame` fire `notify_frame_done` here) | `st20_pipeline_tx.c:991-1000` | direct |
-| a plugin converter or encoder thread ending XFORM (MS2): QUEUED on success, a failed result otherwise (today it fires `notify_frame_done`) | `st20_pipeline_tx.c:380-385` | direct |
+| the application thread in `mtl_tx_submit` with in-caller conversion: it converts before the QUEUED store, so it completes a unit only when the conversion fails (today `put_frame`/`put_ext_frame` fire `notify_frame_done` here) | `st20_pipeline_tx.c:1000-1009` | direct |
+| a plugin converter or encoder thread ending XFORM (MS2): QUEUED on success, a failed result otherwise (today it fires `notify_frame_done`) | `st20_pipeline_tx.c:388-393` | direct |
 | the application thread in `mtl_tx_release` (an APP lease) or `mtl_reap` (result space) | not a completion: a wake source for ACQUIRE (wait-protocol.md §3) | direct |
-| RX tasklet, session spinlock held | `st_rx_video_session.c:3516` → `rv_slot_full_frame` (`:1850-1858`) | the scheduler's bitmap and block |
+| RX tasklet, session spinlock held | `st_rx_video_session.c:3644` → `rv_slot_full_frame` (`:1954-1962`) | the scheduler's bitmap and block |
 | the RX packet lcore (`USE_MULTI_THREADS`) | `rv_pkt_lcore_func` `:2470-2482` | it marks `fired` and, after its handler, wakes its one session (B3); its own stats block |
 | the RX DMA completion drain | `rv_dma_dequeue` | the scheduler's bitmap and block |
 | the last reference to a HELD RX slot (MS2): a TX completing context or `mtl_release` | the core's CAS HELD → FREE, then `rv_put_frame` (`:222-232`) | none for the slot; in a deferred close the last drop posts the retire to a worker |
 
 Removed: the destroying application thread as a completing context (`tv_uinit_hw` →
-`mt_txq_flush` → `tv_frame_free_cb`, `:2722-2728`, `dev/mt_dev.c:1782-1799`).
+`mt_txq_flush` → `tv_frame_free_cb`, `:2722-2728`, `dev/mt_dev.c:1860-1877`).
 
 **Recovery never touches `sh_info`.** Today recovery does `rte_atomic32_dec(&frame->refcnt);
-rte_mbuf_ext_refcnt_set(&frame->sh_info, 0)` (`st_tx_video_session.c:4299-4300` **[verified at
+rte_mbuf_ext_refcnt_set(&frame->sh_info, 0)` (`st_tx_video_session.c:4318-4319` **[verified at
 HEAD]**) while chain mbufs of the frame may still sit in descriptors (the other leg, which
-recovery only pads, `:4284-4288`). The next PMD free then decrements a zeroed count, so the
+recovery only pads, `:4303-4307`). The next PMD free then decrements a zeroed count, so the
 callback never fires or fires for a reused frame **[inferred]** (SF-41). The rule is the recovery
 verdict of [engine.md](engine.md) §5: recovery records the outcome, drops only the references it owns, and lets the last
 PMD reference publish; `sh_info` is written only at frame setup.
@@ -1052,7 +1052,7 @@ handle (R4). There are two layouts, with their fields in this order:
 | Property | Rule |
 |---|---|
 | tables | process-wide, one per type, never per instance (R4, EK20): grow-only chunked arrays of 256 chunk pointers × 256 entries = 65 536 objects per type, in chunks per NUMA node (below the table). A chunk is never freed, so a stale handle always indexes valid memory and fails the generation compare. Nothing is preallocated at 65 536 |
-| size check | the largest session count the engine allows today, 18 schedulers × (60 + 60 video + 512 + 1024 audio) = 29 808 (`st_header.h:33-34`, `:48`, `:50`), fits 16 bits |
+| size check | the largest session count the engine allows today, 18 schedulers × (60 + 60 video + 512 + 1024 audio) = 29 808 (`st_header.h:32-33`, `:47`, `:49`), fits 16 bits |
 | generations | start from a random seed per table slot, slot generations from the entry's lease base (below); skip 0, advance on every reuse. A lease of another session fails deterministically on the index (`-MTL_EBADF`); an old lease of the right session fails on the generation (`-MTL_ESTALE`), so a double submit or a double release cannot corrupt another lease (PR #1610 D4) |
 | reuse | free slots are reused FIFO, as late as possible. Until reuse the slot is a tombstone: `mtl_session_get_state()` answers `MTL_STATE_RETIRED`; an object its instance closed keeps its slot with the condition *closed by the instance* (an entry flag set by the instance's close), where data calls return `-MTL_ESHUTDOWN` and close and release return 0 (contract.md §4.2, last column; R4) |
 | orphans | memory whose instance is gone (a session's slots released after its instance's close) goes on one process-wide lock-free list, each entry with its own free function, pushed by the last release (one CAS, DP); the API shell's control-plane entry, where the fork check runs, frees it before its own work; nothing else frees it, and exit returns it (§7.1, D-116) |
@@ -1090,7 +1090,7 @@ chunks are full. Free entries are reused FIFO per node. A session that migrates 
   seq_cst fence in `rte_rcu_qsbr_thread_online`, the same as an RMW.
 - A state gate alone is unsafe: a reader that loaded RUNNING and was preempted is still inside the
   call when destroy proceeds.
-- Core sessions do not pass the pipelines' `MT_HANDLE_GUARD` (`st20_pipeline_tx.c:763`, `:832`),
+- Core sessions do not pass the pipelines' `MT_HANDLE_GUARD` (`st20_pipeline_tx.c:771`, `:841`),
   whose RMW on an application-owned line costs about 20 ns at frame rate in false sharing; legacy
   st20p keeps it until the MS2 re-base replaces it with the core's counter.
 - Revisit QSBR only if a per-packet DP call ever appears (packet units are per chunk).
@@ -1176,7 +1176,7 @@ commands at all: flush and discard of QUEUED units are control-plane CASes on th
 
 **The `tick` hook** (MS2, D-127). One tick per session: TX in the builder's
 `tvs_tasklet_handler` (`st_tx_video_session.c:2673-2711`), RX in `rvs_pkt_rx_tasklet_handler`
-(`st_rx_video_session.c:3506-3535`); the transmitter (`video_trs_tasklet_handler`,
+(`st_rx_video_session.c:3634-3663`); the transmitter (`video_trs_tasklet_handler`,
 `st_video_transmitter.c:665-690`) calls nothing of the core. A session's builder and transmitter
 run on one scheduler ([engine.md](engine.md) §2.8), so the builder's tick may act on the transmitter's per-session state
 between handler calls. The other essences' handlers get the same tick when they join (MS4). Per
@@ -1201,7 +1201,7 @@ binding's `get_next_frame` returns "no frame" unless the session is RUNNING, and
 the control-plane CAS over the QUEUED slots, raced by submit as §5.3 says; a unit already in
 ENGINE completes normally. Close
 detaches through today's lock-based `st20_tx_free`/`st20_rx_free` path (`tv_mgr_detach`,
-`st_tx_video_session.c:3798-3816`). There is no `ack`, no `CMD_TIMEOUT` and no cut at the next
+`st_tx_video_session.c:3816-3834`). There is no `ack`, no `CMD_TIMEOUT` and no cut at the next
 packet for `mtl_instance_abort` until MS2.
 
 ### 5.3 Immediate commands: stop, discard, abort
@@ -1211,7 +1211,7 @@ and the detached session hold for any posted command.
 
 - **A TX unit waiting for its launch.** Stop(FLUSH) and discard are immediate: the waiting unit
   (packets in the session ring, none handed to the NIC) is flushed as recovery cleans the ring
-  today (`mt_ring_dequeue_clean`, `st_tx_video_session.c:4250-4253`); its outcome is
+  today (`mt_ring_dequeue_clean`, `st_tx_video_session.c:4269-4272`); its outcome is
   `MTL_TX_FLUSHED` with `STOP_FLUSH` or `DISCARD`.
 - **A sleeping scheduler.** Posting calls `sch_sleep_wakeup` when the scheduler sleeps; the mutex
   and condvar are taken by the posting CP thread, never by the tasklet.
@@ -1225,7 +1225,7 @@ and the detached session hold for any posted command.
 - **A slot a plugin is converting** ([contract.md](contract.md) §4.5): stop FLUSH, discard and abort
   wait for that conversion (the transform state's claim and done on the slot, D-100); today's
   pipeline reclaim CAS CONVERTED → FLUSHED is safe against the builder's pick-up CAS the same way,
-  `st20_pipeline_tx.c:210-213`.
+  `st20_pipeline_tx.c:212-215`.
 
 ### 5.4 Update: running and stopped
 
@@ -1254,8 +1254,8 @@ sequenceDiagram
 - Packets already in rings and descriptors carry the old header, so the ack reports the first
   media index sent to the new destination (this matches IS-05 scheduled activation).
 - (MS5) The kernel-socket backend sends GSO to `t->send_addr`, fixed at queue creation
-  (`datapath/mt_dp_socket.c:236`, SF-36): a worker creates a new queue and it is swapped at the
-  boundary. The RTCP TX header copied from `s_hdr` at init (`st_tx_video_session.c:1023-1025`)
+  (`datapath/mt_dp_socket.c:241`, SF-36): a worker creates a new queue and it is swapped at the
+  boundary. The RTCP TX header copied from `s_hdr` at init (`st_tx_video_session.c:1040-1042`)
   is updated too (SF-37).
 - RX: the new flow rule joins the same queue before the old one is removed. With `MTL_AT_TAI t`
   the old rules accept only units whose media time is before t and the new ones only units at or

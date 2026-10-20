@@ -190,9 +190,9 @@ The picture of the deferred wake and the per-context table of `mt_wake()` are
 [core.md](core.md) §6.
 
 **The flush.** Each scheduler calls the environment's wake flush hook (core.md §2.4) once per iteration.
-In `sch_tasklet_func` (`mt_sch.c:155-242`) the call sits after the handler loop (`:210`), inside
-the `time_measure` window, and before the sleep check (`:211`); its return is added to `pending`.
-On loop exit the flush runs with no bound (after the `ops->stop` loop, `mt_sch.c:231-236`).
+In `sch_tasklet_func` (`mt_sch.c:153-240`) the call sits after the handler loop (`:208`), inside
+the `time_measure` window, and before the sleep check (`:209`); its return is added to `pending`.
+On loop exit the flush runs with no bound (after the `ops->stop` loop, `mt_sch.c:229-234`).
 
 ```text
 FLUSH(Lp)

@@ -70,7 +70,7 @@ promise is in the table; `sketch/check.sh` prints the functions per header and p
 | unified symbols | one version node per milestone, `MTL_UNIFIED_EXPERIMENTAL_<rev>_MSn` (MS1: `..._0_2_MS1`), inheriting the previous, continued in parts `_MSn.k`; every node a release carries is sealed; all renamed on every incompatible change ([Sealing](#3-version-nodes-and-sealing)) | `MTL_1.0`; then one `MTL_1.k` per release that adds functions |
 | the bridge's symbols | in `_BRIDGE` ([migration.md](migration.md) §6.2) | in `MTL_LEGACY_BRIDGE` |
 | exports | a function is exported from the milestone its comment tag and call-class argument name, and the installed header declares the whole design, so a call above `MTL_LEVEL` fails to compile (GCC, Clang ≥ 14) or to link (D-106); a value of an exported call that is not built yet returns `-MTL_ENOTSUP` (`NOT_IMPLEMENTED`) | every function of the frozen set |
-| other symbols | today `lib/meson.build:151` has no version script; MS1 (H1b): `lib/src/unified/libmtl.map` holds only the unified nodes, the rest exported as today (no `local: *`), with the export checks; MS3, after an `nm` audit of leaked-symbol users: the soname, the `MTL_LEGACY` node for the legacy headers' functions, then `local: *` (D-108) | `MTL_LEGACY` hidden in stages (§6.3) |
+| other symbols | today `lib/meson.build:161` has no version script; MS1 (H1b): `lib/src/unified/libmtl.map` holds only the unified nodes, the rest exported as today (no `local: *`), with the export checks; MS3, after an `nm` audit of leaked-symbol users: the soname, the `MTL_LEGACY` node for the legacy headers' functions, then `local: *` (D-108) | `MTL_LEGACY` hidden in stages (§6.3) |
 | headers | `include/mtl/experimental/` (`mtl.h` and its optional headers, moved verbatim from `doc/unified-api/sketch/` in MS1; the `MTL_LATER` blocks are installed for design checks only: a call into them fails to compile with GCC and Clang ≥ 14, else to link, and their names may change in any release) | `include/mtl/`; `include/mtl/experimental/<h>` a forwarding stub from F to F+2 (below) |
 | debug API | `mtl_debug.h` exists only with `-Denable_debug_api=true`; otherwise `-MTL_ENOTSUP` | same |
 | version | `MTL_API_VERSION` (compile time), `mtl_library_version_num()` (runtime), both `MTL_VERSION_NUM(a, b, c)`; today `MTL_VERSION_NUM(0, 2, 0)` | the release |
@@ -79,7 +79,7 @@ With the soname of MS3 every consumer relinks once; older binaries bind their un
 references to the default versions. Hiding the legacy symbols later removes names from `MTL_LEGACY`
 only: a binary that needs one fails at load, and binaries that use only `MTL_1.0` are untouched
 (the bridge is in `MTL_LEGACY_BRIDGE`, not `MTL_1.0`), so legacy removal never forces a unified application to relink. On Windows the `.def` is generated
-from the exports (`lib/meson.build:122-123`), so hidden visibility shrinks it automatically; legacy
+from the exports (`lib/meson.build:132-133`), so hidden visibility shrinks it automatically; legacy
 symbols stay exported until F+2. Distribution advice: `libmtl-dev` ships the public headers,
 `libmtl-legacy-dev` the legacy headers until F+2 (the DPDK driver-SDK precedent,
 `-Denable_driver_sdk`).
@@ -219,7 +219,7 @@ meta in `struct st_frame`); the st30 and st40 pipeline headers take `st_tx_port`
 ABI lives in it; GStreamer uses `st20_rx_frame_meta` (`ecosystem/gstreamer_plugin/gst_mtl_st20p_rx.c:140`).
 Splitting them is churn on an API slated for deprecation, so the whole legacy set moves as one
 tier. The session layer stays the internal engine: the pipelines call `st20_tx_create()`
-(`lib/src/st2110/pipeline/st20_pipeline_tx.c:482`), and the core creates its engine sessions the
+(`lib/src/st2110/pipeline/st20_pipeline_tx.c:490`), and the core creates its engine sessions the
 same way, with the binding's callbacks in the `ops`.
 
 The two pictures below are today's include graph (from [coverage.md §4.1](coverage.md#41-todays-public-header-set),

@@ -42,7 +42,7 @@ the one in Needs is done or done with exceptions.
 
 | Milestone | Ledger | Needs | State | Lead agent | Exit commit | Exit evidence |
 |---|---|---|---|---|---|---|
-| R0 (re-pin to the new base, autonomous-run.md §1) | this file | — | in progress | | | |
+| R0 (re-pin to the new base, autonomous-run.md §1) | this file | — | in progress | `a382f8ddd6f259ae0` | | |
 | L0 (the legacy baseline, autonomous-run.md §1) | this file, §1 | R0 | todo | | | |
 | MS1 | [ms1-status.md](ms1-status.md) | L0 | todo | | | |
 | MS2a | ms2a-status.md | MS1 | todo | | | |
