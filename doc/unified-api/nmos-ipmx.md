@@ -735,7 +735,7 @@ with care [verified in `lib/`; effort I]:
 | `interfaces[]` MAC | no MAC getter | set the VF MAC from the PF (`ip link set <pf> vf <n> mac …`) and publish it |
 | BCP-008 | per-session lost-packet and incomplete-frame counters; no link status, no late counter, no ST 2110-22 stats | map the counters; take the link from the PF |
 | DSCP | 0 on every packet, no field | none (IPMX needs it) |
-| video update bug | the video TX update writes the source port into the destination port when `udp_src_port` is set (`st_tx_video_session.c:3829-3830`) | leave `udp_src_port` 0, or take PR #1770 |
+| video update bug | the video TX update wrote the source port into the destination port when `udp_src_port` was set; fixed on main, `fc331c22e` (`st_tx_video_session.c:3846-3849`) | leave `udp_src_port` 0 on an older MTL, or take PR #1770 |
 
 ### 5.2 On the unified API
 

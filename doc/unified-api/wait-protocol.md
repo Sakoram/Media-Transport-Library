@@ -779,8 +779,9 @@ the interrupt pair joins MS2a's weak-memory item.
 - The console control handler runs on its own thread.
 - In MS1 the unified library and its waits are Linux only.
 
-Today `*_wake_block()` does not make `get_frame` return early: the predicate loop sleeps again
-until the deadline (`st20_pipeline_tx.c:781-788`, SF-16), so shutdown takes up to the 1 s block
-timeout. From the MS2b re-base `wake_block` increments the wrapper's `kick` and runs
-EVENT(s, ACQUIRE), and the legacy wait's T3 also returns when `kick` moved, so a blocked
-`get_frame` returns NULL once (migration.md §6.5, LB-14).
+Until `0d05bbd40` a TX `*_wake_block()` did not make `get_frame` return early: the predicate loop
+slept again until the deadline (SF-16), so shutdown took up to the 1 s block timeout. Today the
+wait ends when the count of `wake_block` calls moved (`st20_pipeline_tx.c:787-797`). From the
+MS2b re-base `wake_block` increments the wrapper's `kick` and runs EVENT(s, ACQUIRE), and the
+legacy wait's T3 also returns when `kick` moved, so a blocked `get_frame` returns NULL once
+(migration.md §6.5, LB-14).

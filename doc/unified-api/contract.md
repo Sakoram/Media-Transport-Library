@@ -2474,7 +2474,7 @@ sequenceDiagram
 | `MTL_PATH_COPY` | packets built by copying (no chain, cvideo, audio, ANC, fastmeta, AF_XDP, kernel socket, copy-only regions) | an extra copy from an internal frame |
 | `MTL_PATH_COPY_CONVERT` | a copy of a converted frame | — |
 
-`path` is the granted session path; it changes only on a reported downgrade (`MTL_EVENT_PACING_CHANGED`, loss of a DMA engine). What each packet did is in the per-unit counters, because the RX DMA decision is per packet (`st_rx_video_session.c:1804-1827`). Header split, a third RX direct path, is cut (CUT-1, [coverage.md](coverage.md)).
+`path` is the granted session path; it changes only on a reported downgrade (`MTL_EVENT_PACING_CHANGED`, loss of a DMA engine). What each packet did is in the per-unit counters, because the RX DMA decision is per packet (`st_rx_video_session.c:1908-1931`). Header split, a third RX direct path, is cut (CUT-1, [coverage.md](coverage.md)).
 - **`MTL_SESSION_REQUIRE_DIRECT` never copies silently**: query and create fail when a unit would be copied or converted (`-MTL_ENOTSUP`, `DIRECT_IMPOSSIBLE`; a pool below `min_count_direct` is `POOL_TOO_SMALL`) (G-13). An attach of a copy-only region (`MTL_BACKING_FILE`, a read-only mapping, imported memory in PA mode) to such a session fails the same way. `caps.tx_copy` with it is `-MTL_EINVAL`.
 - Library-pool and attached-pool units follow the same timing and outcome accounting (G-15).
 
@@ -2637,8 +2637,9 @@ GPU pinned host memory imports as host memory today.
        (`rx.units_flushed`).
    - It runs on the tasklet at the command's acknowledgement (MS2a `tick`) when the session is
      on a scheduler, after the engine's DMA for the unit in assembly has drained. That drain is
-     new code in the RX binding; today's `rv_slot_by_tmstamp` only refuses a new frame while DMA
-     is in flight, `:1202-1208`. In CREATED and STOPPED it runs on the calling thread.
+     new code in the RX binding; today's `rv_slot_by_tmstamp` flushes the DMA in flight for a
+     bounded time (`rv_dma_flush`, `:1571-1591`, since `f64db786a`) and refuses a new frame only
+     when that flush fails, `:1229-1235`. In CREATED and STOPPED it runs on the calling thread.
    - **Generations.**
      - A generation is 31-bit, from 1, wrapping 2^31 − 1 → 1. g is older than G when
        (G − g) mod (2^31 − 1) lies in [1, 2^30).

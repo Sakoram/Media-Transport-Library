@@ -223,11 +223,13 @@ OI-60):
 
 ### 3.2 Code that must land first
 
-- **PR #1770** (open, 38 commits): of its rows MS1 needs SF-05/MF1 (an ext buffer is reported done
-  before its `refcnt` is decremented, `tv_frame_free_cb`, `st_tx_video_session.c:134-135`), SF-08,
+- **PR #1770** (open, 38 commits): of its rows MS1 needs SF-05/MF1 (an ext buffer was reported done
+  before its `refcnt` was decremented, `tv_frame_free_cb`; fixed on main, `8c9d48f3e`, which
+  decrements and clears before notifying, `st_tx_video_session.c:144-155`), SF-08,
   SF-09 and SF-23. If it is not merged by the end of week 1, the MF1 hunk is taken into task E1a. The
   PR also fixes the video `update_destination` that writes the source UDP port into the destination
-  port (`st_tx_video_session.c:3829-3830`); task G1a (MS3) takes that hunk if the PR is not merged.
+  port (fixed on main, `fc331c22e`, `st_tx_video_session.c:3846-3849`); task G1a (MS3) takes that
+  hunk if the PR is not merged.
 - **PR #1610's legacy st20p parity tests**, folded into main's harness
   (`tests/unit/pipeline/st20p_tx_harness.c`, `st20p_harness.c`) before any engine change of MS1, so
   they pin today's behaviour (task T1). Its eventfd and poll loop in `mt_session_event.c` and
@@ -262,7 +264,7 @@ The question each spike answers is in [engine.md](engine.md) §6.1.
 | integration tests | `tests/unified_integration_tests/` → the `UnifiedKahawaiTest` binary | the harness and the ported suites of `tests/integration_tests/`, copied and rewritten on the new API (§4.1); `tests/integration_tests/` stays frozen as `KahawaiTest` |
 | RxTxApp | `tests/tools/UnifiedRxTxApp/` → `UnifiedRxTxApp`, installed beside `RxTxApp` | the framework and the ported kinds of `tests/tools/RxTxApp/`, copied and rewritten on the new API, with the same CLI and JSON; `tests/tools/RxTxApp/` stays frozen (§4.1, D-110) |
 | samples | `app/sample/`, on the new API only | §4.2: they replace the legacy samples and together call every exported function (G-114) |
-| acceptance | `tests/acceptance/mtl_engine/`: a `UnifiedRxTxApp` adapter beside `RxTxApp`; the `application` fixture (`conftest.py:1404`) gains `rxtxapp_unified` | `--app rxtxapp\|rxtxapp_unified\|all` (default `all`) selects (§4.1) |
+| acceptance | `tests/acceptance/mtl_engine/`: a `UnifiedRxTxApp` adapter beside `RxTxApp`; the `application` fixture (`conftest.py:1401`) gains `rxtxapp_unified` | `--app rxtxapp\|rxtxapp_unified\|all` (default `all`) selects (§4.1) |
 | doc test | `doc/unified-api/sketch/check.sh` reads the headers from `include/` after task H1b | in CI through `.github/path_filters.yml`; it prints the function counts per header, per call class and per milestone tag, which no document repeats, and runs `gen_api_doc.py --check` (the marked tables), the availability lint and the number lint (README §1) |
 | status ledger | `doc/unified-api/ms1-status.md` | ms1-status.md §1 |
 
@@ -655,8 +657,9 @@ Claude Code session restarts after P0 so the new MCP parameters and agent prompt
   migration.md §6.5 is a BLOCKER;
 - the stale claims of the repository `CLAUDE.md`: `.clang-format` is a real file, not a link to
   `.github/linters/`, and pre-commit pins mirrors-clang-format v22.1.8, not clang-format-14; the
-  same claim is in `.github/skills/mtl-build/SKILL.md:30` and
-  `.github/instructions/mtl-c-coding.instructions.md:97`;
+  same claim was in `.github/skills/mtl-build/SKILL.md` and
+  `.github/instructions/mtl-c-coding.instructions.md`; `1faeea2ea` fixed all three
+  (`SKILL.md:32-36`, `mtl-c-coding.instructions.md:96`);
 - **the scheduler iteration histogram**, P0's one library change, in the table below;
 - **the perf scripts** of S0 in `.github/scripts/perf/`: `s0_load.py` writes the JSON of U and
   of the monitor M for a load, a session count and the legs (one multicast group per session;
@@ -680,7 +683,7 @@ Claude Code session restarts after P0 so the new MCP parameters and agent prompt
 
 | Design to read | Code to open first |
 |---|---|
-| §3.1, §5.8; README.md §1; pr1610.md §3 (row P0) | `.github/mcp/mtl_mcp_server.py` (`run_gtest`, `_validate_bdf`), `.github/scripts/gtest.sh:380`, `tests/integration_tests/tests.cpp:61-86`, the agents of `.github/claude/agents/` and `.github/agents/`, `mtl-system-setup.instructions.md`; for the histogram `mt_sch.c:153-240`, `:452-470`, `mt_util.h:330-342`, `tests/unit/sch/` |
+| §3.1, §5.8; README.md §1; pr1610.md §3 (row P0) | `.github/mcp/mtl_mcp_server.py` (`run_gtest`, `_validate_bdf`), `.github/scripts/gtest.sh:380`, `tests/integration_tests/tests.cpp:61-86`, the agents of `.github/claude/agents/` and `.github/agents/`, `mtl-system-setup.instructions.md`; for the histogram `mt_sch.c:153-240`, `:450-468`, `mt_util.h:330-342`, `tests/unit/sch/` |
 
 ##### M0
 
@@ -729,7 +732,7 @@ D-row, so ask first.
 
 | Design to read | Code to open first |
 |---|---|
-| §3.3, §8.4; engine.md §6.1 | `tests/tools/RxTxApp/src/args.c` (`--tasklet_time`, `--sch_session_quota`, `--rx_timing_parser`, `--lcores`); `lib/src/mt_sch.c:153-240`, `:452-470`; `st_rx_timing_parser.c:234`; `.github/scripts/perf/` |
+| §3.3, §8.4; engine.md §6.1 | `tests/tools/RxTxApp/src/args.c` (`--tasklet_time`, `--sch_session_quota`, `--rx_timing_parser`, `--lcores`); `lib/src/mt_sch.c:153-240`, `:450-468`; `st_rx_timing_parser.c:234`; `.github/scripts/perf/` |
 
 ##### T1
 
@@ -759,7 +762,7 @@ Gate 2:
    fail.
 1. *The headers* (was H1a): moved verbatim to `include/mtl/experimental/` (`./format-coding.sh`
    leaves them unchanged), with a CI job and path filters. The same commit updates every path that
-   names the headers: `sketch/gen_api_doc.py` (`HDR` at `:18`, the links at `:77`), the `inc=`
+   names the headers: `sketch/gen_api_doc.py` (`HDR` at `:18`, the links at `:88`), the `inc=`
    line of `check.sh`, the 29 `sketch/include` links of the documents, the README "Normative" row
    and sketch/README; and it removes `doc/unified-api/sketch/include`. The headers keep
    `/* clang-format off */`: formatting would move the milestone tags off the comment's last line
@@ -1044,7 +1047,7 @@ with their doc links. Each sample's first comment carries `Needs: MSn`, as the e
 
 | Design to read | Code to open first |
 |---|---|
-| §4.1, §4.2, §5.3, §5.5, §8.8; examples.md (ex01, ex02, ex24); concepts.md; the acceptance and gtest instructions | `conftest.py:1404`, `mtl_engine/RxTxApp.py`, `rxtxapp.py` (`validate_results`), `const.py:30-31`; `gtest.sh` (`generate_test_cases()`), `.github/workflows/`; `app/sample/meson.build`, `app/meson.build`, `sample_util.c`, `app/sample/README.md`, the documents that link samples |
+| §4.1, §4.2, §5.3, §5.5, §8.8; examples.md (ex01, ex02, ex24); concepts.md; the acceptance and gtest instructions | `conftest.py:1401`, `mtl_engine/RxTxApp.py`, `rxtxapp.py` (`validate_results`), `const.py:30-31`; `gtest.sh` (`generate_test_cases()`), `.github/workflows/`; `app/sample/meson.build`, `app/meson.build`, `sample_util.c`, `app/sample/README.md`, the documents that link samples |
 
 ##### A2b
 
@@ -1179,7 +1182,7 @@ runners.
 | `Admit.ready_delay`, `Admit.late_drop_behind_inflight` (C2b) | the launch steps of D-218 (G-151); a late drop behind a unit in flight stores W (D-209) |
 | `Start.single_grid` (A2a) | a single start lands on the session's index grid (D-233): the NOW cases; the `MTL_AT_*` cases in MS3 |
 | `Format.names_one_value` (A2c) | every format name parses back to one (value, kind): G-153 |
-| `Compat.log_lines` | the create and stat lines of `compat_log.c` match the regexes of `RxTxApp.py:919-922`, `rxtxapp.py:347`, `:401` and `application_base.py:424-426` (D-110) |
+| `Compat.log_lines` | the create and stat lines of `compat_log.c` match the regexes of `RxTxApp.py:919-922`, `rxtxapp.py:347`, `:399` and `application_base.py:424-426` (D-110) |
 | `Legacy.raster_from_legacy` | every legacy (fps, interlaced) pair: G-124 |
 | `Sync.grid_offset` | `mtl_grid_offset` exact and in [0, TFRAME): G-128 (the helper) |
 | `Bridge.*` (the MS1 cases) | `time_direct_clocks`, `time_enotsup_user_ptp`, `tai_refresh_step_bound`, `uninit_with_open_wrapper`, `c_key_ebusy`, `utc_warning` (D-235) over a fake `struct mtl_main_impl`: G-126, G-127 (MS1 parts) |

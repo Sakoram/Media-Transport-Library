@@ -6,7 +6,7 @@
 | Audience | application authors, codec plugin authors, binding maintainers, implementers of the legacy pipeline wrappers |
 
 This page moves code from today's MTL API to `mtl.h` and its optional headers. Today's API is
-`mtl_api.h`, `st_pipeline_api.h` and the session headers (`st20_api.h` … `st41_api.h`). The legacy
+`mtl_api.h`, `st_pipeline_api.h` and the session headers (`st20_api.h` … `st40_api.h`). The legacy
 `st*p_*` pipelines implement the same maps when they become wrappers on the core (§6.3): a legacy
 `ops` struct is translated field by field as §4 says. Read [concepts.md](concepts.md) for the model
 and [contract.md](contract.md) for the normative behaviour;
@@ -129,7 +129,7 @@ with the unified one.
 | ST 2110-22 rate | the size `get_next_frame` gives | CBR, padded to `codestream_bytes` (D-32); `MTL_CVIDEO_VBR_MAX` keeps the legacy wire |
 | packet units | the session rewrites the RTP timestamp | verbatim (D-82); `sc.packet.set_fields` names what the library writes |
 | UDP port | `udp_port = 0` derives a port from the session index, and TX and RX disagree (below) | `udp_port = 0` is `-MTL_EINVAL` unless the leg is reserved: pass the old value to keep the wire |
-| TX SSRC | deterministic: `idx + 0x123450` video, `+ 0x223450` audio, `+ 0x323450` ANC and fastmeta (`st_tx_video_session.c:983`, `st_tx_audio_session.c:188`, `st_tx_ancillary_session.c:259`, `st_tx_fastmetadata_session.c:189`) | random (RFC 3550 §8): set `sc.ssrc` to keep one, or capture filters keyed on the SSRC break silently |
+| TX SSRC | deterministic: `idx + 0x123450` video, `+ 0x223450` audio, `+ 0x323450` ANC, fast metadata included (`st_tx_video_session.c:983`, `st_tx_audio_session.c:188`, `st_tx_ancillary_session.c:259`) | random (RFC 3550 §8): set `sc.ssrc` to keep one, or capture filters keyed on the SSRC break silently |
 | time without PTP | any reader accepted | `ip.time_source` 0 is `MTL_TIME_SOURCE_AUTO`, which never starts the built-in PTP client; how it picks its source is [timing.md §2.2](timing.md#22-time-sources). An estimated source is accepted, but times are flagged ESTIMATED with a timing warning (`TIME_ESTIMATED`) |
 | interlaced rate | `ops.fps` is the field rate | `raster.fps` is the frame rate: `mtl_raster_from_legacy()` halves it; above 30 frames per second interlaced is `-MTL_EINVAL` (§5.1) |
 | audio `ST31_PTIME_80US` | 4 samples at 48 kHz every 80 µs: a 50 kHz RTP rate (SF-35) | 4 samples every 83⅓ µs, as ST 2110-31 Table 1 defines; `info.ptime_ps` reports it ([timing.md](timing.md) §8) |
@@ -139,11 +139,10 @@ with the unified one.
 
 The legacy derived ports: video 10000 + 2·idx on both sides (`st_tx_video_session.c:3408`,
 `st_rx_video_session.c:3505`); audio TX 10100 + 2·idx against RX 20000 + 2·idx
-(`st_tx_audio_session.c:2126`, `st_rx_audio_session.c:997`); ANC and fastmeta TX 10200 + 2·idx
-against RX 30000 + 2·idx (`st_tx_ancillary_session.c:1782`, `st_rx_ancillary_session.c:1012`,
-`st_tx_fastmetadata_session.c:1442`, `st_rx_fastmetadata_session.c:435`). A TX
-`*_update_destination()` with port 0 derives the RX base instead (`st_tx_audio_session.c:2261`,
-`st_tx_ancillary_session.c:1959`).
+(`st_tx_audio_session.c:2126`, `st_rx_audio_session.c:997`); ANC, fast metadata included, TX
+10200 + 2·idx against RX 30000 + 2·idx (`st_tx_ancillary_session.c:1782`,
+`st_rx_ancillary_session.c:1012`). A TX `*_update_destination()` with port 0 derives the RX base
+instead (`st_tx_audio_session.c:2261`, `st_tx_ancillary_session.c:1959`).
 
 ## 2. Call map per legacy family
 
@@ -207,7 +206,7 @@ way (§2.3).
 
 | Family | Unified |
 |---|---|
-| all sessions (`st20_`, `st22_`, `st30_`, `st40_`, `st41_*_create`) | `mtl_session_open()`; `type` picks `sc.unit`: `FRAME_LEVEL` → `MTL_UNIT_FRAME`, `SLICE_LEVEL` → `MTL_UNIT_ROWS`, `RTP_LEVEL` → `MTL_UNIT_PACKETS` |
+| all sessions (`st20_`, `st22_`, `st30_`, `st40_*_create`) | `mtl_session_open()`; `type` picks `sc.unit`: `FRAME_LEVEL` → `MTL_UNIT_FRAME`, `SLICE_LEVEL` → `MTL_UNIT_ROWS`, `RTP_LEVEL` → `MTL_UNIT_PACKETS` |
 | `get_next_frame` + `notify_frame_done`; `notify_frame_ready` + `*_rx_put_framebuff()` | acquire + submit + reap; dequeue + release, on the application's thread |
 | `*_tx_get_framebuffer(h, idx)`, `st22_*_get_fb_addr()`; `*_get_framebuffer_count()`, `_size()` | `mtl_session_get_slot()`; `info.pool_count`, `info.unit_bytes` |
 | `st20_tx_set_ext_frame()` | attached pool + `mtl_tx_acquire_slot()` |
@@ -222,7 +221,7 @@ way (§2.3).
 | `st30_calculate_framebuff_size()`, `st30_get_packet_size()` | `info.unit_bytes`; `mtl_audio_bytes(&sc.audio, samples, &bytes)` |
 | `notify_timing_parser_result` (audio, every 200 ms per port) | `mtl_rx_detail.timing[]` per unit and leg (`dpvr_max_ns`, `ipt_max_ns`, `tsdf_ns`); stats `tp.*` |
 | `st40p_*_get_udw_buff_addr()`, `*_max_udw_buff_size()`; `struct st40_frame_info`, `struct st40_meta`; `st40_tx_get_framebuffer()` | `u.plane[1].addr` and `u.plane[1].rows` (`sc.anc.max_udw_words`); the entries of `u.plane[0]` (`mtl_anc_table`), `u.used` = `meta_num`; `mtl_session_get_slot()` ([contract.md](contract.md) §5.7) |
-| `st41_rx_*` (RTP level only today) | `MTL_UNIT_PACKETS` reproduces it; frame units on RX are new |
+| `st40_rx_*` with `ST40_RX_FLAG_FAST_METADATA` (RTP level only today) | `MTL_UNIT_PACKETS` reproduces it; frame units on RX are new |
 | `st22_encoder_register()`, `st_plugin_register()` | plugin ABI v2 (§7) |
 
 ### 2.4 Shared helpers (`st_api.h`, `st_pipeline_api.h`, `st_convert_api.h`, `st40_api.h`)
@@ -301,7 +300,7 @@ as `if (!u.media_tai_ns)` lets NONE through, because NONE is not 0 (and 0 is a r
 | `*_RX_FLAG_SIMULATE_PKT_LOSS` | `mtl_debug_inject(obj, MTL_FAULT_DROP_PKTS, &p)`: `leg`, `drop_every`, `drop_count`, `drop_offset` | debug builds; a pattern |
 | `rtcp.sim_loss_rate`, `rtcp.burst_loss_max` | `mtl_debug_inject(obj, MTL_FAULT_DROP_RANDOM, &p)`: `drop_ppm`, `drop_count` (the burst) | debug builds; a random rate |
 | `ST20*_`, `ST22*_FLAG_ENABLE_RTCP` | `MTL_OPT_RTX = 1` | MTL's NACK retransmission; the `rtcp` members in §4.4, §4.5 |
-| `ST30*_`, `ST40*_`, `ST41*_FLAG_ENABLE_RTCP` | — | removed (no effect today) |
+| `ST30*_`, `ST40*_FLAG_ENABLE_RTCP` (fast metadata included) | — | removed (no effect today) |
 | `*_TX_FLAG_DEDICATE_QUEUE` | `MTL_OPT_TX_QUEUE = MTL_TXQ_DEDICATED` | flag → option |
 
 ### 4.2 `mtl_init_params`, `mtl_port_init_params`
@@ -533,7 +532,7 @@ raster and launch delay of the first video session of its start array (MS6).
 | `ST40_MAX_META` (20) | `n.max_packets` | 20 keeps today's slot size; 0 = 32 |
 | `framebuff_cnt` | `sc.pool_count` | same |
 | `test` (`st40_tx_test_config`: `pattern`, `frame_count`, `paced_pkt_count`, `paced_gap_ns`) | `mtl_debug_inject(obj, MTL_FAULT_TX_MUTATE, &p)`: `mutation`, `unit_count`, `paced_pkts`, `paced_gap_ns` | debug; `pattern` same values (`NONE` = no call) |
-| `rtp_ring_size` (`st40p_rx_ops`) | — | removed: documented as mandatory (`include/st40_pipeline_api.h:233-234`), read by no pipeline since `d74cd1e0`. Its readers go with it: the GStreamer `rtp-ring-size` property, the st40p sample, two acceptance tests of the check (`test_anc_format.py:1871`, `:1971`) ([engine.md](engine.md) §7.2, DD-16) |
+| `rtp_ring_size` (`st40p_rx_ops`) | — | removed: read by no pipeline since `d74cd1e0`, and documented as unused since `65a0b610f` (`include/st40_pipeline_api.h:241-242`). Its readers go with it: the GStreamer `rtp-ring-size` property, the st40p sample, two acceptance tests of the check (`test_anc_format.py:1871`, `:1971`) ([engine.md](engine.md) §7.2, DD-16) |
 | `SPLIT_ANC_BY_PKT` (ST40 8, ST40P 10) | `MTL_ANCF_NEW_RTP` in `flags` of every entry | flag → per-entry flag |
 | `ST40P_TX_FLAG_FORCE_NUMA` (8), `ST40P_RX_FLAG_FORCE_NUMA` (2) | — | removed ("NOT SUPPORTED YET") |
 | `DISABLE_AUTO_DETECT` (ST40_RX 2, ST40P_RX 3) | `n.detect = MTL_DETECT_OFF` | flag → field (0 = `MTL_DETECT_AUTO`, on for ANC) |
@@ -553,20 +552,22 @@ raster and launch delay of the first video session of its start array (MS6).
 | RX `st40_rx_frame_meta.second_field`, `interlaced`, `rtp_marker`, `seq_lost`, `seq_discont`, `pkts_total`, `pkts_recv[]`, `timestamp_first_pkt`, `status` | `MTL_UNITF_SECOND_FIELD`; `info`/detection; `mtl_rx_detail.marker_seen`, `missing_ranges`, `pkts_received[]`, `arrival_first_tai_ns[]`; `u.status` | as §2.2 |
 | `st40_tx_frame_meta.second_field` | the index parity (`n.video.scan` interlaced) | — |
 
-### 4.12 `st41_tx_ops`, `st41_rx_ops`
+### 4.12 `st40_tx_ops`, `st40_rx_ops` with `ST40_*_FLAG_FAST_METADATA`
 
-`sc.essence = MTL_FASTMETA`.
+`sc.essence = MTL_FASTMETA`. Fast metadata is an opt-in of the ST40 sessions since `88d47ac83`:
+`ST40_TX_FLAG_FAST_METADATA` (bit 9) and `ST40_RX_FLAG_FAST_METADATA` (bit 3) select it
+(`include/st40_api.h:82-102`, `:152-158`); RX is RTP level only.
 
 | Converted as §4.1 | Legacy names |
 |---|---|
-| fields | the flow fields, `type` (TX), `interlaced` (`f.video.scan`), `name`, `priv`, `framebuff_cnt` (TX), the callbacks and RTP-level fields |
-| flags (bit) | `USER_P_MAC` (0), `USER_R_MAC` (1), `USER_PACING` (3), `USER_TIMESTAMP` (4), `DEDICATE_QUEUE` (6), `ENABLE_RTCP` (TX 5, RX 1, removed), `ST41_RX_FLAG_DATA_PATH_ONLY` (0, removed) |
+| fields | the flow fields, `type`, `interlaced` (`f.video.scan`), `name`, `priv`, `framebuff_cnt` (TX), the callbacks and RTP-level fields |
+| flags (bit) | `USER_P_MAC` (0), `USER_R_MAC` (1), `USER_PACING` (3), `USER_TIMESTAMP` (4), `DEDICATE_QUEUE` (6), `ENABLE_RTCP` (TX 5, RX 1, removed), `ST40_RX_FLAG_DATA_PATH_ONLY` (0, removed) |
 
 | Legacy field | New field or option | Conversion |
 |---|---|---|
 | `fps` (TX) | `f.video.fps` | +1; interlaced: halve |
-| `fmd_dit` | `f.data_item_type` | same; RX 0xffffffff (no check) → leave `MTL_FASTMETA_RX_MATCH_DIT` unset in `f.fastmeta_flags`, else set it |
-| `fmd_k_bit` | `f.k_bit` | same; RX 0xff (no check) → leave `MTL_FASTMETA_RX_MATCH_K` unset, else set it |
+| `fmd_dit` (TX only; the RX filter went with st41) | `f.data_item_type` | same; RX 0xffffffff (no check) → leave `MTL_FASTMETA_RX_MATCH_DIT` unset in `f.fastmeta_flags`, else set it |
+| `fmd_k_bit` (TX only) | `f.k_bit` | same; RX 0xff (no check) → leave `MTL_FASTMETA_RX_MATCH_K` unset, else set it |
 
 ### 4.13 `st_api.h` address structs and ST 2110-10 helpers
 
@@ -634,10 +635,11 @@ leg; and the remaining family-specific fields of `st20_tx_user_stats`, `st20_rx_
 20, such as `stat_slices_received`, `stat_pkts_idx_dropped`, `stat_vsync_mismatch`,
 `stat_slot_query_ext_fail`, `stat_pkts_retransmit`, `stat_pkts_user_meta_err`, the interlace field
 counts), `st30_tx_user_stats` (`stat_epoch_late`, the burst and warm-up counters),
-`st40_rx_user_stats` and `st41_rx_user_stats` (`stat_pkts_enqueue_fail`, the gauges
-`stat_last_time` and `stat_max_notify_rtp_us`; `st30_rx` and `st40_rx` `stat_pkts_dropped` are
-never written today). The rule (OI-40): a counter that RxTxApp or a gtest reads gets a key in
-contract.md §11.3 when its reader is ported; a debug-only counter gets none and stays internal.
+`st40_rx_user_stats` (`stat_pkts_enqueue_fail`; the gauges `stat_last_time` and
+`stat_max_notify_rtp_us` went with `st41_rx_user_stats` in `88d47ac83`; `st30_rx` and `st40_rx`
+`stat_pkts_dropped` are never written today). The rule (OI-40): a counter that RxTxApp or a
+gtest reads gets a key in contract.md §11.3 when its reader is ported; a debug-only counter gets
+none and stays internal.
 
 ### 4.15 Fields whose home is easy to miss
 
@@ -763,7 +765,7 @@ st21_pacing` → `enum mtl_sender_type` (`NARROW` 0 → `MTL_SENDER_N`, `WIDE` 1
 
 | Legacy enum | New | Conversion |
 |---|---|---|
-| `enum st20_type` … `st41_type` | `enum mtl_unit_kind` | a table: `FRAME_LEVEL` 0 → `MTL_UNIT_FRAME` 0, `RTP_LEVEL` 1 → `MTL_UNIT_PACKETS` 2, `SLICE_LEVEL` 2 → `MTL_UNIT_ROWS` 1 |
+| `enum st20_type` … `st40_type` | `enum mtl_unit_kind` | a table: `FRAME_LEVEL` 0 → `MTL_UNIT_FRAME` 0, `RTP_LEVEL` 1 → `MTL_UNIT_PACKETS` 2, `SLICE_LEVEL` 2 → `MTL_UNIT_ROWS` 1 |
 | `enum st22_codec`: `JPEGXS` 0, `H264_CBR` 1, `H264` 2, `H265_CBR` 3, `H265` 4 | `c.codec`: `MTL_CODEC_JPEGXS` 1, `_H264` 2, `_H265` 3; `c.rate_mode` | `_CBR` → `MTL_CVIDEO_CBR`; H.264/H.265 without it → `MTL_CVIDEO_VBR_MAX`; JPEG XS → CBR |
 | `enum st22_pack_type`, `enum st22_quality_mode` | `enum mtl_cvideo_pack`, `enum mtl_cvideo_quality` | +1 |
 | `enum st_plugin_device`: `AUTO` 0, `CPU` 1, `GPU` 2, `FPGA` 3, `TEST` 4, `TEST_INTERNAL` 5 | `enum mtl_codec_device` | same values; `AUTO` = absent; `MTL_CODEC_DEVICE_TEST` is a device registered with `mtl_plugin_open(mt, NULL, &dev, &h)` |
@@ -812,8 +814,8 @@ The unified headers include no legacy header and redeclare nothing it declares: 
 were renamed (`enum mtl_severity`, `enum mtl_simd`, because `mtl_api.h` owns `enum mtl_log_level` and
 `enum mtl_simd_level`), and `MTL_VERSION_NUM()` is defined identically in both. `sketch/check.sh`
 proves it: when a configured build tree (`build/mtl_build_config.h`) exists, it compiles
-`mtl_api.h`, `st_pipeline_api.h`, `st20_api.h`, `st30_api.h`, `st40_api.h`, `st41_api.h`,
-`st30_pipeline_api.h`, `st40_pipeline_api.h` and every unified header in one translation unit.
+`mtl_api.h`, `st_pipeline_api.h`, `st20_api.h`, `st30_api.h`, `st40_api.h`, `st30_pipeline_api.h`,
+`st40_pipeline_api.h` and every unified header in one translation unit.
 
 ### 6.2 The legacy bridge (`mtl_legacy.h`)
 
@@ -923,15 +925,15 @@ deleted.
 | LB-03 | st20p TX | a converting session fires `notify_frame_done` at conversion, so the application's (ext) frame returns before transport done | `:388-393`, `:1004-1008` | keep | `ST_CORE_LEGACY_EARLY_RELEASE`: the notifier thread fires at the transform's done (XFORM → QUEUED) | frozen `St20p` convert cases; to add: UB `St20pLegacy.notify_at_convert` |
 | LB-04 | st20p TX | interlaced: `get_frame` presets `second_field`, alternating per call; the application may override it | `:821-823` | keep | wrapper | frozen `St20p.digest_1080i_s2` |
 | LB-05 | st20p TX, RX | `user_meta` is reset at `get_frame` (TX) and delivered with the frame (RX) | TX `:825-826`; RX `st20_pipeline_rx.c:931-937` | keep | wrapper (the meta area's `MTL_META_USER` record) | frozen `St20p.digest_user_meta_s2` |
-| LB-06 | st20p TX, RX | `BLOCK_GET` waits up to the block timeout (default 1 s, `st20p_*_set_block_timeout`) and returns NULL on timeout or teardown | TX `:774-789`, `:1134`; RX the same | keep | wrapper: the core's wait with that timeout (fixes SF-15, SF-16); `wake_block` is LB-14 | frozen `St20p.tx_put_frame_abort`; to add: UB `St20pLegacy.block_timeout` |
-| LB-07 | st20p TX, RX | the stat dump prints `TX_st20p(n), frame get try … succ … put … drop …` and resets those counters each dump; the acceptance parser reads it | TX `:680-686`; RX `st20_pipeline_rx.c:801-803` | keep | the compatibility log lines of `compat_log.c` (from stats-registry deltas), not the core | `application_base.py:424-436` regexes in a U test |
-| LB-08 | st20p TX | frame status names (`free`, `ready`, `in_converting`, …) in the dbg queue dump | `:11-18`, `:675` | change: the dump shows core states (a dbg line no parser reads) | — | none needed (dbg only) |
+| LB-06 | st20p TX, RX | `BLOCK_GET` waits up to the block timeout (default 1 s, `st20p_*_set_block_timeout`) and returns NULL on timeout or teardown | TX `:782-798`, `:1143`; RX the same | keep | wrapper: the core's wait with that timeout (fixes SF-15, SF-16); `wake_block` is LB-14 | frozen `St20p.tx_put_frame_abort`; to add: UB `St20pLegacy.block_timeout` |
+| LB-07 | st20p TX, RX | the stat dump prints `TX_st20p(n), frame get try … succ … put … drop …` and resets those counters each dump; the acceptance parser reads it | TX `:688-694`; RX `st20_pipeline_rx.c:801-803` | keep | the compatibility log lines of `compat_log.c` (from stats-registry deltas), not the core | `application_base.py:424-436` regexes in a U test |
+| LB-08 | st20p TX | frame status names (`free`, `ready`, `in_converting`, …) in the dbg queue dump | `:11-18`, `:683` | change: the dump shows core states (a dbg line no parser reads) | — | none needed (dbg only) |
 | LB-09 | st20p RX | `frame->status` COMPLETE, RECONSTRUCTED, CORRUPTED, and CORRUPTED counted in the RX stats | `st20_pipeline_rx.c:940-941` | keep | wrapper (§2.2 status map) | T1 RX cases |
 | LB-10 | st20p RX | `get_frame` scans the ring from the consumer index, not in ready order | `st20_pipeline_rx.c:859-860`, `:927` | open: ring order or `pub_seq` order | — | to add: UB `St20pLegacy.rx_order` |
-| LB-11 | st20p TX, RX | the USDT probes `st20p_tx_frame_get`, `st20p_rx_frame_get` and the RX frame dump fire per frame | TX `:819`; RX `:921-930` | keep | wrapper | to add: a USDT smoke check in the nightly |
+| LB-11 | st20p TX, RX | the USDT probes `st20p_tx_frame_get`, `st20p_rx_frame_get` and the RX frame dump fire per frame | TX `:828`; RX `:942-951` | keep | wrapper | to add: a USDT smoke check in the nightly |
 | LB-12 | st30p, st40p | done-flag order differs from st20p's; st40p keeps the legacy codec, checks and RX parse (D-149) | `st30_pipeline_tx.c`, `st40_pipeline_tx.c` | rows added before MS4a's re-base | — | frozen `St30p*`, `St40p*` |
 | LB-13 | st22p | to be listed before MS4b's re-base | `st22_pipeline_tx.c`, `_rx.c` | rows added before MS4b | — | frozen `St22p*` |
-| LB-14 | st20p TX, RX | `wake_block` makes a blocked `get_frame` return NULL once | `st20_pipeline_tx.c:781-788` (SF-16) | keep | wrapper: `kick` and EVENT(s, ACQUIRE) | to add: UB `St20pLegacy.wake_block_once` |
+| LB-14 | st20p TX, RX | `wake_block` makes a blocked `get_frame` return NULL once | `st20_pipeline_tx.c:789-797` (SF-16, fixed on main, `0d05bbd40`) | keep | wrapper: `kick` and EVENT(s, ACQUIRE) | to add: UB `St20pLegacy.wake_block_once` |
 
 "Open" rows are decided in task RB0 (implementation-plan.md §6.1) before the re-base code starts;
 a re-base commit that touches an open row is rejected.
@@ -1052,13 +1054,13 @@ in MS1 ([implementation-plan.md](implementation-plan.md) §4.1, §5.4). The note
 copy changes.
 
 - **Shape today.** Pipeline apps (`*_st20p_app.c`, `*_st22p_app.c`, `*_st30p_app.c`,
-  `*_st40p_app.c`); session apps for ANC (`*_ancillary_app.c`) and fast metadata
-  (`*_fastmetadata_app.c`) in the main tree; `legacy/` (video, audio, st22 sessions);
+  `*_st40p_app.c`); session apps for ANC (`*_ancillary_app.c`, fast metadata by their
+  `fast_metadata` key) in the main tree; `legacy/` (video, audio, st22 sessions);
   `experimental/rx_st20r_app.c` (`st20rc`, removed with it).
 - **JSON.** Keep the schema; change only the code that builds the configuration. The acceptance
-  suite uses the kinds `video`, `st20p`, `st22p`, `st30p`, `audio`, `ancillary`, `st40p`,
-  `fastmetadata` (`tests/acceptance/mtl_engine/rxtxapp_config.py:16-44`) and the RxTxApp in
-  `.local_install`.
+  suite uses the kinds `video`, `st20p`, `st22p`, `st30p`, `audio`, `ancillary`, `st40p`
+  (`tests/acceptance/mtl_engine/rxtxapp_config.py:16-42`) and the RxTxApp in `.local_install`;
+  RxTxApp rejects a `fastmetadata` group since `88d47ac83`.
 - **Fields.** `rtp_timestamp_delta_us` → `tx.rtp_trim_ns` (§4.1); `exact_user_pacing` →
   `MTL_SESSION_EXACT_LAUNCH` at create, `MTL_SUBMIT_EXACT` and `u.launch_tai_ns` per unit; `ST_EVENT_VSYNC` →
   `MTL_EVENT_EPOCH_TICK` with `MTL_OPT_EPOCH_TICK`; slice and RTP-level video → `MTL_UNIT_ROWS`,

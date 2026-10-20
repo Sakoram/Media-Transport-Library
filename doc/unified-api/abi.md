@@ -22,7 +22,7 @@ release stage comes.
 
 ## 1. Today
 
-There is no ABI promise. `libmtl.so` has no soname version (`lib/meson.build:151-159`: no
+There is no ABI promise. `libmtl.so` has no soname version (`lib/meson.build:161-169`: no
 `soversion`, `version`, `gnu_symbol_visibility` or version script) and exports everything: 757
 dynamic function symbols, 235 of them internal (`mt_*`, `tv_*`, `rv_*`). `ops` structs are copied
 with the library's `sizeof` and have no reserved fields, so silent breaks have shipped

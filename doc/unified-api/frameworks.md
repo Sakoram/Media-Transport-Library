@@ -64,7 +64,7 @@ every frame. Normative rules: [timing.md](timing.md).
 | `-pix_fmt` names chosen per plugin (`mtl_st20p_rx.c:118-160`); `yuv420p` selects the MTL-only YUV420CUSTOM8 passthrough (`:150-158`) | names from `mtl_format_parse()` (D-222): no `_NONSTD` value has an `av_pix_fmt` name, so `yuv420p` selects a compliant format, a change on MTL-to-MTL links; today's names stay one release cycle in a logged, deprecated alias table |
 | ST22 `pack_type` (`mtl_st22p_tx.c:81`) | `MTL_OPT_CVIDEO_PACK` (`SLICE` is `-MTL_ENOTSUP`) |
 | `ST20_RX_FLAG_DMA_OFFLOAD` on `st20p_rx_ops` (`mtl_st20p_rx.c:176`, wrong namespace) | `MTL_OPT_DMA = MTL_REQ_PREFER`; fixed on the legacy plugin meanwhile (stage A, abi.md §6.3) |
-| `GPU_DIRECT`, with `gpu_context` pointing at a stack local (`mtl_st20p_rx.c:207,217`) | `MTL_MEM_DEVICE` of `mtl_mem_open()` (U-117); GPU-pinned host memory works with `mtl_mem_import()` |
+| `GPU_DIRECT`, with `gpu_context` in the plugin context (`mtl_st20p_rx.c:209`, `:214`; a stack local until `8dde2cb2c`) | `MTL_MEM_DEVICE` of `mtl_mem_open()` (U-117); GPU-pinned host memory works with `mtl_mem_import()` |
 
 From MS3 to MS6, while legacy paths remain, `mtl_common.c` keeps its one legacy instance
 (`mtl_init`, `mtl_start`, its clock and PTP flags as today). Each st20p context gets its own
@@ -74,8 +74,8 @@ calls `mtl_uninit` after every reference has closed. MS6 replaces both with
 
 ### 2.3 OBS (`ecosystem/obs_mtl/`)
 
-Input (st20p RX through a callback and condition variable with a stray unlock,
-`linux-mtl/mtl-input.c:86-125`; a per-source `mtl_init`, `:316-337`): `mtl_rx_dequeue(timeout)` on
+Input (st20p RX through a callback and condition variable, `linux-mtl/mtl-input.c:86-124`, whose
+stray unlock `bc98117b6` removed; a per-source `mtl_init`, `:315-336`): `mtl_rx_dequeue(timeout)` on
 the source thread, `mtl_time_convert(…, MTL_CLOCK_TAI, MTL_CLOCK_MONOTONIC, …)` for the OBS
 timestamp, `MTL_INSTANCE_SHARED` across sources. Output (never finished, `#if TODO_OUTPUT`): the
 live-sink recipe (§4). The draft's `tfmt = ST10_TIMESTAMP_FMT_MEDIA_CLK` with an OBS monotonic

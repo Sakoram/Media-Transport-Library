@@ -807,7 +807,7 @@ TSC, §6.1):
 | `cvideo.rate_mode` | Wire |
 |---|---|
 | `MTL_CVIDEO_CBR` (0) | every unit (interlaced: every field) sends the same packet count at a constant TRS; shorter codestreams are padded (RFC 9134 padding) |
-| `MTL_CVIDEO_VBR_MAX` | today's behaviour: packets follow the codestream (`:2481-2485`), TRS from the ceiling (today recomputed per frame, `:750-757`); `MTL_INFO_NON_COMPLIANT` in `mtl_session_info.flags` (IPMX uses it) |
+| `MTL_CVIDEO_VBR_MAX` | today's behaviour: packets follow the codestream (`st_tx_video_session.c:2498-2502`), TRS from the ceiling (today recomputed per frame, `:767-774`); `MTL_INFO_NON_COMPLIANT` in `mtl_session_info.flags` (IPMX uses it) |
 
 The codestream size rules (the per-unit ceiling, the box header, the oversize check at submit):
 [contract.md](contract.md) §3.3.
@@ -1210,12 +1210,12 @@ feasible epoch index with its `tx.index_offset` and L_v.
   `-MTL_EINVAL`, as today. The packet time is S/Fs, exact. Packet p covers `[p·S, (p+1)·S)` since T0, or since the last re-phasing DISCONTINUITY.
 - **The non-integer case, 80 µs.** `MTL_PTIME_80US` is 3.84 samples at 48 kHz (7.68 at 96 kHz), but
   ST 2110-31 §6.1 Table 1 defines `a=ptime:0.08` as 4 samples at 48 kHz (8 at 96 kHz), a packet
-  every 83⅓ µs (Table 1 note 1: the signalled value only approximates the period). Today MTL sends 4
-  (8) samples (`st_fmt.c:1172-1174` at 48 kHz, `:1197-1199` at 96 kHz) every 80 000 ns
+  every 83⅓ µs (Table 1 note 1: the signalled value only approximates the period). MTL sends 4
+  (8) samples (`st_fmt.c:1172-1174` at 48 kHz, `:1197-1199` at 96 kHz) every 4 / 48 000 s
   (`st_fmt.c:1111-1113`; ST30 TX uses `trs = pkt_time`, `epochs = TAI / pkt_time`, RTP = epochs × S,
-  `st_tx_audio_session.c:207-211`, `:238`, `:274-282`), a 50 kHz RTP rate at 48 kHz (+4.17 %, ≈ 41.7
-  ms per second against PTP; side finding SF-35).
-  The unified API sends S = 4 (8) at the packet time S/Fs = 83⅓ µs, so `RTP = floor(M × Fs)` and pacing agree (D-41), and reports the granted packet time as the stats key `info.ptime_ps` (83333333 ps); this is what open PR #1770 does on the legacy path.
+  `st_tx_audio_session.c:207-211`, `:238`, `:274-282`). Until `7cbe505d5` the period was 80 000 ns,
+  a 50 kHz RTP rate at 48 kHz (+4.17 %, ≈ 41.7 ms per second against PTP; side finding SF-35).
+  The unified API sends S = 4 (8) at the packet time S/Fs = 83⅓ µs, so `RTP = floor(M × Fs)` and pacing agree (D-41), and reports the granted packet time as the stats key `info.ptime_ps` (83333333 ps); the legacy path paces the same since `7cbe505d5`.
 - **Carry.** A submission whose end is not on a packet boundary leaves a partial packet (AAC 1024 = 21 × 48 + 16; 800/801 samples per frame at 59.94; 1601/1602 at 29.97). At pick-up MTL copies the tail into a per-session carry buffer (< S × channels × sample size, ≤ 1152 B at Level A). Submission n completes at its last whole packet and its slot returns promptly; the
   straddling packet belongs to n+1 and uses n+1's deadline. On a stop, a drop or a late n+1, the carry is zero-padded to a full packet and sent on time (`samples_padded`). The audio `pickup_lead_ns` is therefore one packet earlier than the first packet's launch.
 - **Where a submission lands.** e = the expected first sample (end of the previous submission); s = the given one (`media_index`, or `round(media_tai_ns × Fs)` in TAI mode after snapping to the sample grid).
@@ -1386,12 +1386,16 @@ flowchart LR
 
 ### 9.3 Fastmeta (ST 2110-41)
 
-Today ST41 is video-rate based: `frame_time = 1e9·den/mul` from the session fps, RTP `epochs × frame_time_sampling` at 90 kHz (`st_tx_fastmetadata_session.c:206-234`; `sampling_clock_rate = 90000` in `st_fmt.c`); `fps`, `interlaced` and `second_field` are in `st41_tx_ops` and `st41_tx_frame_meta` (`include/st41_api.h:135-175`). R stays 90000; an item spec needing another RTP clock is a later
+Today ST 2110-41 is a mode of the ST40 session (`ST40_TX_FLAG_FAST_METADATA`) and video-rate based:
+`frame_time = 1e9·den/mul` from the session fps, RTP from the frame's TAI at 90 kHz
+(`st_tx_ancillary_session.c:273-288`, `:462-479`; `sampling_clock_rate = 90000` in `st_fmt.c`);
+`fps`, `interlaced` and `second_field` are in `st40_tx_ops` and `st40_tx_frame_meta`
+(`include/st40_api.h:396-436`). R stays 90000; an item spec needing another RTP clock is a later
 extension (ST 2110-41 §5.3 lets the item spec define it).
 
 - `fastmeta.video` is the **associated video raster**: one data item group per video frame or field, `media_index` = the video index, RTP = the video RTP, on the grid like ANC. All zero takes the raster and launch delay of the first video session of its start; with no video in the start it is required (`-MTL_EINVAL`, `FIELD_REQUIRED`).
 - `MTL_FASTMETA_FREE_RUNNING`: `video.fps` is the stream's own unit rate (required). The stream is off the video grid (excluded from G), `M(k) = T0 + k/rate` on the epoch; in TAI mode each unit's time is taken as given (no snap); RTP = `floor(M × 90000)`.
-- Field parity follows the index (`video.scan`); there is no `second_field` input. Launch `M + fastmeta.target_delay_ns` (§5.3); keep-alive by the underrun policy (§6.4); marker 0 on every packet (this edition; MTL sets 0, `st_tx_fastmetadata_session.c:186`).
+- Field parity follows the index (`video.scan`); there is no `second_field` input. Launch `M + fastmeta.target_delay_ns` (§5.3); keep-alive by the underrun policy (§6.4); marker 0 on every packet (this edition; MTL sets 0, `st_tx_ancillary_session.c:252`, copied at `:568`).
 
 ## 10. A/V/ANC synchronisation
 

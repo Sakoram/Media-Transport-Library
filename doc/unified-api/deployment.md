@@ -151,8 +151,9 @@ builds. A debug-API library logs a warning at open and reports it in its stats.
 MtlManager is a root daemon: it grants CPUs across processes, loads XDP programs, adds flows and UDP
 filters, and hands out XSK map descriptors. At `545a266a` **[verified]** unless marked:
 
-- the socket `/var/run/imtl/mtl_manager.sock` (`manager/mtl_mproto.h:16`, no override) is mode `0777`
-  ("Allow all users to connect (which might be insecure)", `manager/mtl_manager.cpp:95-96`);
+- the socket `/var/run/imtl/mtl_manager.sock` (`manager/mtl_mproto.h:16`, no override) is mode `0666`
+  ("Allow all users to connect (which might be insecure)", `manager/mtl_manager.cpp:112-122`;
+  `0777` until `04138ad2c`);
 - a client's identity is the PID and UID it writes in its own register message (`mt_instance.c:213-214`,
   read at `manager/mtl_instance.hpp:191-213`); there is no `SO_PEERCRED`;
 - so any local user can get an interface's XSK map descriptor over `SCM_RIGHTS`
@@ -818,10 +819,10 @@ What the audit found, with the engine fix that removes it ([engine.md](engine.md
 | 2–3 | opt-in phc2sys steers the node's `CLOCK_REALTIME` (`ADJ_SETOFFSET`, `ADJ_FREQUENCY`, `ADJ_TICK`) and never restores it; the PTP client leaves its frequency offset on a shared PF PHC | `mt_ptp.c:163-240`, `:358-390` | EK10 |
 | 4 | MtlManager resolves a pod's ifindex in its own namespace | [engine.md §7.3](engine.md#73-pod-hazards-h-k) | EK5 |
 | 5 | manager restart: no reconnect, live rules wiped | [engine.md §7.3](engine.md#73-pod-hazards-h-k) | EK5 |
-| 6–7, 24 | manager: only SIGINT handled, so SIGTERM kills it without cleanup **[inferred]**; socket `0777`, identity self-reported; a second manager unlinks the live socket | `manager/mtl_manager.cpp:57-61`, `:101`, `:96`; `manager/mtl_instance.hpp:191-213` | EK5 |
-| 8 | library manager I/O: no timeout, no `MSG_NOSIGNAL`; a missing manager silently selects the shm allocator | `mt_instance.c:17`, `:24`, `:69`, `:91`; `mt_main.c:484` | EK4 |
+| 6–7, 24 | manager: only SIGINT handled, so SIGTERM killed it without cleanup (fixed on main, `b10015803`); socket `0666` (`0777` until `04138ad2c`), identity self-reported; a second manager unlinks the live socket | `manager/mtl_manager.cpp:72-77`, `:101`, `:112-122`; `manager/mtl_instance.hpp:191-213` | EK5 |
+| 8 | library manager I/O: no timeout (`MSG_NOSIGNAL` since `d65ecb135`); a missing manager silently selects the shm allocator | `mt_instance.c:17`, `:24`, `:69`, `:91`; `mt_main.c:484` | EK4 |
 | 9 | CPU allocators keyed by remapped lcore ID (`--remap-lcore-ids`), not CPU | `manager/mtl_lcore.hpp:11-55`; `mt_sch.c:742-758`; `dev/mt_dev.c:443-446` | EK6 |
-| 10 | SysV lcore table (`ftok("/dev/null", 21)`, `/tmp/kahawai_lcore.lock`) with `kill(pid, 0)` and hostname checks; the clean tool clears nothing | `mt_sch.c:505-525`, `:548-554`, `:683-697`, `:1292-1317`; `mt_platform.h:57` | EK6 |
+| 10 | SysV lcore table (`ftok("/dev/null", 21)`, `/tmp/kahawai_lcore.lock`) with `kill(pid, 0)` and hostname checks; the clean tool clears nothing | `mt_sch.c:503-523`, `:548-554`, `:683-697`, `:1292-1317`; `mt_platform.h:57` | EK6 |
 | 11 | `lcores` without `main_lcore` puts CPU 0 in `-l`; a worker CPU outside the cpuset is `rte_panic` | `dev/mt_dev.c:430-441`; DPDK `eal.c:838-843`, `:878-881` | EK7 |
 | 12 | `numa_bind` rewrites the caller's affinity and memory policy | `mt_main.c:448-461` | EK13 |
 | 13 | unbounded stop waits: `sch_stop`, `rte_eal_wait_lcore`, `mt_handle_drain`, `flock`, manager `recv` | `mt_sch.c:314-319`, `:515`; `mt_handle_guard.h:130`; `mt_instance.c:24` | EK1 |
@@ -836,7 +837,7 @@ What the audit found, with the engine fix that removes it ([engine.md](engine.md
 | 22 | kernel-socket ARP busy-spins on a failing `sendto`; `mtl_abort` cannot stop it | `mt_socket.c:323-328` | EK3 |
 | 23 | `kahawai.json` in the working directory can `dlopen` plugins | `mt_config.c:52-61` | EK12 |
 | 25 | SKB-mode XDP never detached: the mode is overwritten to NATIVE | `manager/mtl_interface.hpp:420-430` | EK5 |
-| 26–27 | `/tmp` lock needed without the manager; telemetry socket on by default, fixed `MT_DPDK` prefix | `mt_sch.c:505-514`; `dev/mt_dev.c:336-345` | EK6, EK12 |
+| 26–27 | `/tmp` lock needed without the manager; telemetry socket on by default, fixed `MT_DPDK` prefix | `mt_sch.c:503-512`; `dev/mt_dev.c:336-345` | EK6, EK12 |
 | 28 | busy-poll CPUs under a CFS quota not detected **[inferred]** | — | EK17 |
 | — | no ethdev RMV, RESET or RECOVERY callback | grep of `lib/src` | EK14 |
 | — | DPDK's VFIO and memfd descriptors without close-on-exec | DPDK `eal_vfio.c:367`, `:379`, `:1297`; `eal_memalloc.c:224-247` | EK15 |
@@ -879,7 +880,7 @@ The requirement coverage K-REQ-1…20 is [requirements.md](requirements.md) §5.
   | ANC wire areas | `pool_count` × round_up(16 × (P + 2) + min(328 × P, 13 × P + ⌈5 × W / 4⌉), 64) | 8 960 B at the defaults |
 
   The mempools of today's engines: `st_tx_video_session.c:2947-3013`, `st_tx_audio_session.c:1835`,
-  `:1863`, `st_tx_ancillary_session.c:1590`, `:1616`, `st_tx_fastmetadata_session.c:1252`, `:1278`.
+  `:1862`, `st_tx_ancillary_session.c:1590`, `:1616` (fast metadata included).
   A pool holds 2 047 mbufs at today's sizes (`mt_util.c:533`), and its cache table is
   `RTE_MAX_LCORE` (128) × 8 256 B (`MT_MBUF_CACHE_SIZE` 128).
 - **Examples** *(est.)*. A 2160p 4:2:2 10-bit sender converting from `MTL_APP_YUV422P10LE` with
